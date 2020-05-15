@@ -13,6 +13,7 @@
 
 #include "mlir/IR/Dominance.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/RegionKindInterface.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Support/GenericDomTreeConstruction.h"
 
@@ -33,13 +34,26 @@ void DominanceInfoBase<IsPostDom>::recalculate(Operation *op) {
 
   /// Build the dominance for each of the operation regions.
   op->walk([&](Operation *op) {
-    for (auto &region : op->getRegions()) {
+    auto kindInterface = dyn_cast<mlir::RegionKindInterface>(op);
+    for (unsigned i = 0; i < op->getNumRegions(); i++) {
+      auto &region = op->getRegion(i);
       // Don't compute dominance if the region is empty.
       if (region.empty())
         continue;
-      auto opDominance = std::make_unique<base>();
-      opDominance->recalculate(region);
-      dominanceInfos.try_emplace(&region, std::move(opDominance));
+
+      // Dominance changes based on the region type.
+      bool hasSSADominance =
+          op->isRegistered() &&
+          (!kindInterface || kindInterface.hasSSADominance(i));
+      // If a region has SSADominance, then compute detailed dominance
+      // info.  Otherwise, all values in the region are live anywhere
+      // in the region, which is represented as an empty entry in the
+      // dominanceInfos map.
+      if (hasSSADominance) {
+        auto opDominance = std::make_unique<base>();
+        opDominance->recalculate(region);
+        dominanceInfos.try_emplace(&region, std::move(opDominance));
+      }
     }
   });
 }
@@ -197,14 +211,31 @@ template class mlir::detail::DominanceInfoBase</*IsPostDom=*/false>;
 /// Return true if operation A properly dominates operation B.
 bool DominanceInfo::properlyDominates(Operation *a, Operation *b) const {
   auto *aBlock = a->getBlock(), *bBlock = b->getBlock();
+  auto *aRegion = a->getParentRegion();
+  Operation *ancestor = aRegion->getParentOp();
+  auto kindInterface = dyn_cast<mlir::RegionKindInterface>(ancestor);
 
   // If a or b are not within a block, then a does not dominate b.
   if (!aBlock || !bBlock)
     return false;
 
-  // If the blocks are the same, then check if b is before a in the block.
-  if (aBlock == bBlock)
-    return a->isBeforeInBlock(b);
+  if (aBlock == bBlock) {
+    int i = 0;
+    for (auto &region : ancestor->getRegions()) {
+      if (aRegion == &region)
+        break;
+      i++;
+    }
+    // Dominance changes based on the region type.
+    bool hasSSADominance = ancestor->isRegistered() &&
+                           (!kindInterface || kindInterface.hasSSADominance(i));
+    if (hasSSADominance) {
+      // If the blocks are the same, then check if b is before a in the block.
+      return a->isBeforeInBlock(b);
+    } else {
+      return true;
+    }
+  }
 
   // Traverse up b's hierarchy to check if b's block is contained in a's.
   if (auto *bAncestor = aBlock->findAncestorOpInBlock(*b)) {
@@ -245,14 +276,32 @@ void DominanceInfo::updateDFSNumbers() {
 /// Returns true if statement 'a' properly postdominates statement b.
 bool PostDominanceInfo::properlyPostDominates(Operation *a, Operation *b) {
   auto *aBlock = a->getBlock(), *bBlock = b->getBlock();
+  auto *aRegion = a->getParentRegion();
+  Operation *ancestor = aRegion->getParentOp();
+  auto kindInterface = dyn_cast<mlir::RegionKindInterface>(ancestor);
 
   // If a or b are not within a block, then a does not post dominate b.
   if (!aBlock || !bBlock)
     return false;
 
   // If the blocks are the same, check if b is before a in the block.
-  if (aBlock == bBlock)
-    return b->isBeforeInBlock(a);
+  if (aBlock == bBlock) {
+    int i = 0;
+    for (auto &region : ancestor->getRegions()) {
+      if (aRegion == &region)
+        break;
+      i++;
+    }
+    // Dominance changes based on the region type.
+    bool hasSSADominance = ancestor->isRegistered() &&
+                           (!kindInterface || kindInterface.hasSSADominance(i));
+    if (hasSSADominance) {
+      // If the blocks are the same, then check if b is before a in the block.
+      return b->isBeforeInBlock(a);
+    } else {
+      return true;
+    }
+  }
 
   // Traverse up b's hierarchy to check if b's block is contained in a's.
   if (auto *bAncestor = a->getBlock()->findAncestorOpInBlock(*b))

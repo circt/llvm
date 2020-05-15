@@ -171,6 +171,13 @@ void CSE::simplifyRegion(ScopedMapTy &knownValues, DominanceInfo &domInfo,
     return;
   }
 
+  // If the region does not have dominanceInfo, then skip it.  This is
+  // a temporary step.  Probably, we just need to apply a different
+  // traversal method.
+  if (!domInfo.hasDominanceInfo(&region)) {
+    return;
+  }
+
   // Note, deque is being used here because there was significant performance
   // gains over vector when the container becomes very large due to the
   // specific access patterns. If/when these performance issues are no
