@@ -383,3 +383,148 @@ func @succeededResultSizeAttr() {
   %0:4 = "test.attr_sized_results"() {result_segment_sizes = dense<[0, 2, 1, 1]>: vector<4xi32>} : () -> (i32, i32, i32, i32)
   return
 }
+
+// -----
+
+func @succeededDominanceFreeScope() -> () {
+  test.graph_region {
+  // %1 is not dominated by its definition.
+    %2:3 = "bar"(%1) : (i64) -> (i1,i1,i1) // CHECK: [[VAL2:%.*]]:3 = "bar"([[VAL3:%.*]]) : (i64) -> (i1, i1, i1)
+    %1 = "baz"(%2#0) : (i1) -> (i64)       // CHECK: [[VAL3]] = "baz"([[VAL2]]#0) : (i1) -> i64
+  }
+  return
+}                                          // CHECK: }
+
+// -----
+
+func @succeededCDFGInDominanceFreeScope() -> () {
+  test.graph_region {
+  // %1 is not dominated by its definition.
+    %2:3 = "bar"(%1) : (i64) -> (i1,i1,i1) // CHECK: [[VAL2:%.*]]:3 = "bar"([[VAL3:%.*]]) : (i64) -> (i1, i1, i1)
+    br ^bb4                                // CHECK:   br ^bb2
+^bb2:                                      // CHECK: ^bb1:   // pred: ^bb1
+    br ^bb2                                // CHECK:   br ^bb1
+^bb4:                                      // CHECK: ^bb2:   // pred: ^bb0
+    %1 = "foo"() : ()->i64                 // CHECK: [[VAL3]] = "foo"() : () -> i64
+  }
+  return                                   // CHECK: return
+}                                          // CHECK: }
+
+// -----
+
+func @succeededHasDominanceScopeOutsideDominanceFreeScope() -> () {
+  "test.ssacfg_region"() ({
+    %1 = "baz"() : () -> (i64)               // CHECK: [[VAL3:%.*]] = "baz"() : () -> i64
+    test.graph_region {                      // CHECK: test.graph_region {
+      // %1 is not dominated by its definition.
+      %2:3 = "bar"(%1) : (i64) -> (i1,i1,i1) // CHECK: [[VAL2:%.*]]:3 = "bar"([[VAL3]]) : (i64) -> (i1, i1, i1)
+    }                                        // CHECK: }
+    %3 = "baz"() : () -> (i64)               // CHECK: [[VAL4:.*]] = "baz"() : () -> i64
+  }) : () -> ()                              // CHECK: }
+  return
+}
+
+// -----
+
+func @failedHasDominanceScopeOutsideDominanceFreeScope() -> () {
+  "test.ssacfg_region"() ({
+    test.graph_region {
+// expected-error @+1 {{operand #0 does not dominate this use}}
+      %2:3 = "bar"(%1) : (i64) -> (i1,i1,i1)
+    }
+// expected-note @+1 {{operand defined here}}
+    %1 = "baz"() : () -> (i64)
+  }) : () -> ()
+  return
+}
+
+// -----
+
+func @succeeededDominanceFreeScopeOutsideHasDominanceScope() -> () {
+  test.graph_region {                         // CHECK: test.graph_region {
+    "test.ssacfg_region"() ({                 // CHECK: "test.ssacfg_region"() ( {
+      %2:3 = "bar"(%1) : (i64) -> (i1,i1,i1)  // CHECK: %1:3 = "bar"(%0) : (i64) -> (i1, i1, i1)
+    }) : () -> ()                             // CHECK: }) : () -> ()
+    %1 = "baz"() : () -> (i64)                // CHECK: %0 = "baz"() : () -> i64
+  }                                           // CHECK: }
+  return                                      // CHECK: return
+}                                             // CHECK: }
+
+// -----
+
+func @succeeededDominanceFreeScopeWithBlockOutsideHasDominanceScope() -> () {
+  test.graph_region {                         // CHECK: test.graph_region {
+    "test.ssacfg_region"() ({                 // CHECK: "test.ssacfg_region"() ( {
+      %2:3 = "bar"(%1) : (i64) -> (i1,i1,i1)  // CHECK: %1:3 = "bar"(%0) : (i64) -> (i1, i1, i1)
+    }) : () -> ()                             // CHECK: }) : () -> ()
+    "terminator"() : () -> ()                 // CHECK: "terminator"() : () -> ()
+^bb2:                                         // CHECK: ^bb1:
+    %1 = "baz"() : () -> (i64)                // CHECK: %0 = "baz"() : () -> i64
+  }                                           // CHECK: }
+  return                                      // CHECK: return
+}
+
+// -----
+
+// Ensure that SSACFG regions of operations in GRAPH regions are
+// checked for dominance
+func @illegalInsideDominanceFreeScope() -> () {
+  test.graph_region {
+    func @test() -> i1 {
+^bb1:
+// expected-error @+1 {{operand #0 does not dominate this use}}
+      %2:3 = "bar"(%1) : (i64) -> (i1,i1,i1)
+// expected-note @+1 {{operand defined here}}
+	   %1 = "baz"(%2#0) : (i1) -> (i64)
+      return %2#1 : i1
+    }
+    "terminator"() : () -> ()
+  }
+  return
+}
+
+// -----
+
+// Ensure that SSACFG regions of operations in GRAPH regions are
+// checked for dominance
+func @illegalCDFGInsideDominanceFreeScope() -> () {
+  test.graph_region {
+    func @test() -> i1 {
+^bb1:
+// expected-error @+1 {{operand #0 does not dominate this use}}
+      %2:3 = "bar"(%1) : (i64) -> (i1,i1,i1)
+      br ^bb4
+^bb2:
+      br ^bb2
+^bb4:
+      %1 = "foo"() : ()->i64   // expected-note {{operand defined here}}
+		return %2#1 : i1
+    }
+     "terminator"() : () -> ()
+  }
+  return
+}
+
+// -----
+
+// Ensure that GRAPH regions still have all values defined somewhere.
+func @illegalCDFGInsideDominanceFreeScope() -> () {
+  test.graph_region {
+// expected-error @+1 {{use of undeclared SSA value name}}
+    %2:3 = "bar"(%1) : (i64) -> (i1,i1,i1)
+    "terminator"() : () -> ()
+  }
+  return
+}
+
+// -----
+
+func @blocks_in_graph_region_require_entry_block() {
+test.graph_region {
+// expected-error@-1 {{entry block of region may not have predecessors}}
+^bb42:
+  br ^bb43
+^bb43:
+  br ^bb42
+}
+}

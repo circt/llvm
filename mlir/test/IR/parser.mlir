@@ -1243,15 +1243,54 @@ func @pretty_names() {
 }
 
 func @unreachable_dominance_violation_ok() -> i1 {
-  %c = constant false       // CHECK: [[VAL:%.*]] = constant false
-  return %c : i1    // CHECK:   return [[VAL]] : i1
-^bb1:         // CHECK: ^bb1:   // no predecessors
+  %c = constant false                    // CHECK: [[VAL:%.*]] = constant false
+  return %c : i1                         // CHECK:   return [[VAL]] : i1
+^bb1:                                    // CHECK: ^bb1:   // no predecessors
   // %1 is not dominated by it's definition, but block is not reachable.
   %2:3 = "bar"(%1) : (i64) -> (i1,i1,i1) // CHECK: [[VAL2:%.*]]:3 = "bar"([[VAL3:%.*]]) : (i64) -> (i1, i1, i1)
-  br ^bb4     // CHECK:   br ^bb3
-^bb2:         // CHECK: ^bb2:   // pred: ^bb2
-  br ^bb2     // CHECK:   br ^bb2
-^bb4:         // CHECK: ^bb3:   // pred: ^bb1
-  %1 = "foo"() : ()->i64 // CHECK: [[VAL3]] = "foo"() : () -> i64
-  return %2#1 : i1 // CHECK: return [[VAL2]]#1 : i1
-}            // CHECK: }
+  br ^bb4                                // CHECK:   br ^bb3
+^bb2:                                    // CHECK: ^bb2:   // pred: ^bb2
+  br ^bb2                                // CHECK:   br ^bb2
+^bb4:                                    // CHECK: ^bb3:   // pred: ^bb1
+  %1 = "foo"() : ()->i64                 // CHECK: [[VAL3]] = "foo"() : () -> i64
+  return %2#1 : i1                       // CHECK: return [[VAL2]]#1 : i1
+}                                        // CHECK: }
+
+func @graph_region_in_hierarchy_ok() -> i64 {
+  br ^bb2                                  // CHECK: br ^bb2
+^bb1:                                      // CHECK: ^bb1:
+  test.graph_region {
+    // %1 is well-defined here, since bb2 dominance bb1.
+    %2:3 = "bar"(%1) : (i64) -> (i1,i1,i1) // CHECK: [[VAL2:%.*]]:3 = "bar"([[VAL3:%.*]]) : (i64) -> (i1, i1, i1)
+  }
+  br ^bb4                                  // CHECK:   br ^bb3
+^bb2:                                      // CHECK: ^bb2:   // pred: ^bb0
+  %1 = "foo"() : ()->i64                   // CHECK: [[VAL3]] = "foo"() : () -> i64
+  br ^bb1                                  // CHECK:   br ^bb1
+^bb4:                                      // CHECK: ^bb3:   // pred: ^bb1
+  return %1 : i64                          // CHECK: return [[VAL3]] : i64
+}                                          // CHECK: }
+
+func @graph_region_in_dominance_free_hierarchy_ok() -> () {
+  test.graph_region {
+    br ^bb2                                  // CHECK: br ^bb2
+^bb1:                                        // CHECK: ^bb1:
+    test.graph_region {
+    // %1 is well-defined here since defined in graph region
+      %2:3 = "bar"(%1) : (i64) -> (i1,i1,i1) // CHECK: [[VAL2:%.*]]:3 = "bar"([[VAL3:%.*]]) : (i64) -> (i1, i1, i1)
+    }
+    br ^bb4                                  // CHECK:   br ^bb3
+^bb2:                                        // CHECK: ^bb2:   // pred: ^bb0
+    %1 = "foo"() : ()->i64                   // CHECK: [[VAL3]] = "foo"() : () -> i64
+    br ^bb1                                  // CHECK:   br ^bb1
+  ^bb4:                                      // CHECK: ^bb3:   // pred: ^bb1
+    "test.terminator"() : ()->()
+  }                                          // CHECK: }
+  return                                     // CHECK: return
+}
+
+"unregistered_func"() ( {
+  %1 = "foo"(%2) : (i64) -> i64
+  %2 = "bar"(%1) : (i64) -> i64
+  "unregistered_terminator"() : () -> ()
+}) {sym_name = "unregistered_op_dominance_violation_ok", type = () -> i1} : () -> ()

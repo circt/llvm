@@ -58,9 +58,13 @@ private:
   LogicalResult verifyBlock(Block &block);
   LogicalResult verifyOperation(Operation &op);
 
-  /// Verify the dominance within the given IR unit.
+  /// Verify the dominance property of operations within the given
+  /// Region.
   LogicalResult verifyDominance(Region &region);
-  LogicalResult verifyDominance(Operation &op);
+
+  /// Verify the dominance property of regions contained within the
+  /// given Operation
+  LogicalResult verifyDominanceOfContainedRegions(Operation &op);
 
   /// Emit an error for the given block.
   InFlightDiagnostic emitError(Block &bb, const Twine &message) {
@@ -96,9 +100,8 @@ LogicalResult OperationVerifier::verify(Operation &op) {
   // verifier to be resilient to malformed code.
   DominanceInfo theDomInfo(&op);
   domInfo = &theDomInfo;
-  for (auto &region : op.getRegions())
-    if (failed(verifyDominance(region)))
-      return failure();
+  if (failed(verifyDominanceOfContainedRegions(op)))
+    return failure();
 
   domInfo = nullptr;
   return success();
@@ -223,43 +226,41 @@ LogicalResult OperationVerifier::verifyOperation(Operation &op) {
 
 LogicalResult OperationVerifier::verifyDominance(Region &region) {
   // Verify the dominance of each of the held operations.
-  for (auto &block : region)
-    // Dominance is only reachable inside reachable blocks.
+  for (auto &block : region) {
+    // Dominance is only meaningful inside reachable blocks.
     if (domInfo->isReachableFromEntry(&block))
-      for (auto &op : block) {
-        if (failed(verifyDominance(op)))
-          return failure();
-      }
-    else
-      // Verify the dominance of each of the nested blocks within this
-      // operation, even if the operation itself is not reachable.
       for (auto &op : block)
-        for (auto &region : op.getRegions())
-          if (failed(verifyDominance(region)))
-            return failure();
+        // Check that operands properly dominate this use.
+        for (unsigned operandNo = 0, e = op.getNumOperands(); operandNo != e;
+             ++operandNo) {
+          auto operand = op.getOperand(operandNo);
+          if (domInfo->properlyDominates(operand, &op))
+            continue;
+
+          auto diag = op.emitError("operand #")
+                      << operandNo << " does not dominate this use";
+          if (auto *useOp = operand.getDefiningOp())
+            diag.attachNote(useOp->getLoc()) << "operand defined here";
+          return failure();
+        }
+    // Recursively verify dominance within each operation in the
+    // block, even if the block itself is not reachable, or we are in
+    // a region which doesn't respect dominance.
+    for (auto &op : block)
+      if (failed(verifyDominanceOfContainedRegions(op)))
+        return failure();
+  }
   return success();
 }
 
-LogicalResult OperationVerifier::verifyDominance(Operation &op) {
-  // Check that operands properly dominate this use.
-  for (unsigned operandNo = 0, e = op.getNumOperands(); operandNo != e;
-       ++operandNo) {
-    auto operand = op.getOperand(operandNo);
-    if (domInfo->properlyDominates(operand, &op))
-      continue;
-
-    auto diag = op.emitError("operand #")
-                << operandNo << " does not dominate this use";
-    if (auto *useOp = operand.getDefiningOp())
-      diag.attachNote(useOp->getLoc()) << "operand defined here";
-    return failure();
-  }
-
-  // Verify the dominance of each of the nested blocks within this operation.
-  for (auto &region : op.getRegions())
+/// Verify the dominance of each of the nested blocks within the given operation
+LogicalResult
+OperationVerifier::verifyDominanceOfContainedRegions(Operation &op) {
+  for (unsigned i = 0; i < op.getNumRegions(); i++) {
+    auto &region = op.getRegion(i);
     if (failed(verifyDominance(region)))
       return failure();
-
+  }
   return success();
 }
 
