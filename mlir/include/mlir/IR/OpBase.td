@@ -571,6 +571,10 @@ class VectorOfLengthAndType<list<int> allowedLengths,
 
 def AnyVector : VectorOf<[AnyType]>;
 
+// Shaped types.
+
+def AnyShaped: ShapedContainerType<[AnyType], IsShapedTypePred, "shaped">;
+
 // Tensor types.
 
 // Any tensor type whose element type is from the given `allowedTypes` list
@@ -1428,7 +1432,7 @@ def StrArrayAttr : TypedArrayAttrBase<StrAttr, "string array attribute"> {
   let constBuilderCall = "$_builder.getStrArrayAttr($0)";
 }
 def TypeArrayAttr : TypedArrayAttrBase<TypeAttr, "type array attribute"> {
-  let constBuilderCall = ?;
+  let constBuilderCall = "$_builder.getTypeArrayAttr($0)";
 }
 
 // Attribute information for an Attribute field within a StructAttr.
@@ -1672,7 +1676,7 @@ class OpTrait;
 // purpose to wrap around C++ symbol string with this class is to make
 // traits specified for ops in TableGen less alien and more integrated.
 class NativeOpTrait<string prop> : OpTrait {
-  string trait = "OpTrait::" # prop;
+  string trait = "::mlir::OpTrait::" # prop;
 }
 
 // ParamNativeOpTrait corresponds to the template-parameterized traits in the
@@ -1687,7 +1691,7 @@ class ParamNativeOpTrait<string prop, string params>
 // affects op definition generator internals, like how op builders and
 // operand/attribute/result getters are generated.
 class GenInternalOpTrait<string prop> : OpTrait {
-  string trait = "OpTrait::" # prop;
+  string trait = "::mlir::OpTrait::" # prop;
 }
 
 // PredOpTrait is an op trait implemented by way of a predicate on the op.
@@ -2002,8 +2006,8 @@ class Op<Dialect dialect, string mnemonic, list<OpTrait> props = []> {
   //
   // ```c++
   // static void build(OpBuilder &, OperationState &odsState,
-  //                   ArrayRef<Type> resultTypes,
-  //                   ArrayRef<Value> operands,
+  //                   TypeRange resultTypes,
+  //                   ValueRange operands,
   //                   ArrayRef<NamedAttribute> attributes);
   // ```
   list<OpBuilder> builders = ?;

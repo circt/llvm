@@ -39,13 +39,6 @@ FunctionPass *createSCCPPass();
 
 //===----------------------------------------------------------------------===//
 //
-// DeadInstElimination - This pass quickly removes trivially dead instructions
-// without modifying the CFG of the function.  It is a FunctionPass.
-//
-Pass *createDeadInstEliminationPass();
-
-//===----------------------------------------------------------------------===//
-//
 // RedundantDbgInstElimination - This pass removes redundant dbg intrinsics
 // without modifying the CFG of the function.  It is a FunctionPass.
 //
@@ -339,6 +332,13 @@ Pass *createLoopDeletionPass();
 // ConstantHoisting - This pass prepares a function for expensive constants.
 //
 FunctionPass *createConstantHoistingPass();
+
+//===----------------------------------------------------------------------===//
+//
+// ConstraintElimination - This pass eliminates conditions based on found
+//                         constraints.
+//
+FunctionPass *createConstraintEliminationPass();
 
 //===----------------------------------------------------------------------===//
 //

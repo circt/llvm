@@ -717,6 +717,12 @@ let Command = "script add" in {
     "LLDB event system.">;
 }
 
+let Command = "script" in {
+  def script_language : Option<"language", "l">,
+    EnumArg<"ScriptLang", "ScriptOptionEnum()">, Desc<"Specify the scripting "
+    " language. If none is specific the default scripting language is used.">;
+}
+
 let Command = "source info" in {
   def source_info_count : Option<"count", "c">, Arg<"Count">,
     Desc<"The number of line entries to display.">;
@@ -1168,4 +1174,20 @@ let Command = "watchpoint command add" in {
 let Command = "watchpoint delete" in {
   def watchpoint_delete_force : Option<"force", "f">, Group<1>,
     Desc<"Delete all watchpoints without querying for confirmation.">;
+}
+
+let Command = "trace load" in {
+  def trace_load_verbose : Option<"verbose", "v">, Group<1>,
+    Desc<"Show verbose trace load logging for debugging the plug-in "
+    "implementation.">;
+}
+
+let Command = "trace dump" in {
+  def trace_dump_verbose : Option<"verbose", "v">, Group<1>,
+    Desc<"Show verbose trace information.">;
+}
+
+let Command = "trace schema" in {
+  def trace_schema_verbose : Option<"verbose", "v">, Group<1>,
+    Desc<"Show verbose trace schema logging for debugging the plug-in.">;
 }

@@ -3053,6 +3053,11 @@ KnownBits SelectionDAG::computeKnownBits(SDValue Op, const APInt &DemandedElts,
     Known.Zero.setBitsFrom(Log2_32(PossibleOnes) + 1);
     break;
   }
+  case ISD::PARITY: {
+    // Parity returns 0 everywhere but the LSB.
+    Known.Zero.setBitsFrom(1);
+    break;
+  }
   case ISD::LOAD: {
     LoadSDNode *LD = cast<LoadSDNode>(Op);
     const Constant *Cst = TLI->getTargetConstantFromLoad(LD);
@@ -5335,8 +5340,8 @@ SDValue SelectionDAG::getNode(unsigned Opcode, const SDLoc &DL, EVT VT,
     // amounts.  This catches things like trying to shift an i1024 value by an
     // i8, which is easy to fall into in generic code that uses
     // TLI.getShiftAmount().
-    assert(N2.getValueType().getScalarSizeInBits().getFixedSize() >=
-               Log2_32_Ceil(VT.getScalarSizeInBits().getFixedSize()) &&
+    assert(N2.getValueType().getScalarSizeInBits() >=
+               Log2_32_Ceil(VT.getScalarSizeInBits()) &&
            "Invalid use of small shift amount with oversized value!");
 
     // Always fold shifts of i1 values so the code generator doesn't need to
@@ -6098,7 +6103,7 @@ static SDValue getMemcpyLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
         Store = DAG.getStore(
             Chain, dl, Value,
             DAG.getMemBasePlusOffset(Dst, TypeSize::Fixed(DstOff), dl),
-            DstPtrInfo.getWithOffset(DstOff), Alignment.value(), MMOFlags);
+            DstPtrInfo.getWithOffset(DstOff), Alignment, MMOFlags);
         OutChains.push_back(Store);
       }
     }
@@ -6122,13 +6127,13 @@ static SDValue getMemcpyLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
           ISD::EXTLOAD, dl, NVT, Chain,
           DAG.getMemBasePlusOffset(Src, TypeSize::Fixed(SrcOff), dl),
           SrcPtrInfo.getWithOffset(SrcOff), VT,
-          commonAlignment(*SrcAlign, SrcOff).value(), SrcMMOFlags);
+          commonAlignment(*SrcAlign, SrcOff), SrcMMOFlags);
       OutLoadChains.push_back(Value.getValue(1));
 
       Store = DAG.getTruncStore(
           Chain, dl, Value,
           DAG.getMemBasePlusOffset(Dst, TypeSize::Fixed(DstOff), dl),
-          DstPtrInfo.getWithOffset(DstOff), VT, Alignment.value(), MMOFlags);
+          DstPtrInfo.getWithOffset(DstOff), VT, Alignment, MMOFlags);
       OutStoreChains.push_back(Store);
     }
     SrcOff += VTSize;
@@ -6248,10 +6253,10 @@ static SDValue getMemmoveLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
     if (isDereferenceable)
       SrcMMOFlags |= MachineMemOperand::MODereferenceable;
 
-    Value = DAG.getLoad(
-        VT, dl, Chain,
-        DAG.getMemBasePlusOffset(Src, TypeSize::Fixed(SrcOff), dl),
-        SrcPtrInfo.getWithOffset(SrcOff), SrcAlign->value(), SrcMMOFlags);
+    Value =
+        DAG.getLoad(VT, dl, Chain,
+                    DAG.getMemBasePlusOffset(Src, TypeSize::Fixed(SrcOff), dl),
+                    SrcPtrInfo.getWithOffset(SrcOff), *SrcAlign, SrcMMOFlags);
     LoadValues.push_back(Value);
     LoadChains.push_back(Value.getValue(1));
     SrcOff += VTSize;
@@ -6263,10 +6268,10 @@ static SDValue getMemmoveLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
     unsigned VTSize = VT.getSizeInBits() / 8;
     SDValue Store;
 
-    Store = DAG.getStore(
-        Chain, dl, LoadValues[i],
-        DAG.getMemBasePlusOffset(Dst, TypeSize::Fixed(DstOff), dl),
-        DstPtrInfo.getWithOffset(DstOff), Alignment.value(), MMOFlags);
+    Store =
+        DAG.getStore(Chain, dl, LoadValues[i],
+                     DAG.getMemBasePlusOffset(Dst, TypeSize::Fixed(DstOff), dl),
+                     DstPtrInfo.getWithOffset(DstOff), Alignment, MMOFlags);
     OutChains.push_back(Store);
     DstOff += VTSize;
   }
@@ -6366,7 +6371,7 @@ static SDValue getMemsetStores(SelectionDAG &DAG, const SDLoc &dl,
     SDValue Store = DAG.getStore(
         Chain, dl, Value,
         DAG.getMemBasePlusOffset(Dst, TypeSize::Fixed(DstOff), dl),
-        DstPtrInfo.getWithOffset(DstOff), Alignment.value(),
+        DstPtrInfo.getWithOffset(DstOff), Alignment,
         isVol ? MachineMemOperand::MOVolatile : MachineMemOperand::MONone);
     OutChains.push_back(Store);
     DstOff += VT.getSizeInBits() / 8;
@@ -7031,8 +7036,7 @@ SDValue SelectionDAG::getIndexedLoad(SDValue OrigLoad, const SDLoc &dl,
       ~(MachineMemOperand::MOInvariant | MachineMemOperand::MODereferenceable);
   return getLoad(AM, LD->getExtensionType(), OrigLoad.getValueType(), dl,
                  LD->getChain(), Base, Offset, LD->getPointerInfo(),
-                 LD->getMemoryVT(), LD->getAlignment(), MMOFlags,
-                 LD->getAAInfo());
+                 LD->getMemoryVT(), LD->getAlign(), MMOFlags, LD->getAAInfo());
 }
 
 SDValue SelectionDAG::getStore(SDValue Chain, const SDLoc &dl, SDValue Val,
@@ -9762,16 +9766,16 @@ bool BuildVectorSDNode::isConstantSplat(APInt &SplatValue, APInt &SplatUndef,
 
 SDValue BuildVectorSDNode::getSplatValue(const APInt &DemandedElts,
                                          BitVector *UndefElements) const {
+  unsigned NumOps = getNumOperands();
   if (UndefElements) {
     UndefElements->clear();
-    UndefElements->resize(getNumOperands());
+    UndefElements->resize(NumOps);
   }
-  assert(getNumOperands() == DemandedElts.getBitWidth() &&
-         "Unexpected vector size");
+  assert(NumOps == DemandedElts.getBitWidth() && "Unexpected vector size");
   if (!DemandedElts)
     return SDValue();
   SDValue Splatted;
-  for (unsigned i = 0, e = getNumOperands(); i != e; ++i) {
+  for (unsigned i = 0; i != NumOps; ++i) {
     if (!DemandedElts[i])
       continue;
     SDValue Op = getOperand(i);

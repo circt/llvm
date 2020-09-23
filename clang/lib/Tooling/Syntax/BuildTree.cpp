@@ -155,10 +155,10 @@ private:
 } // namespace
 
 static CallExpr::arg_range dropDefaultArgs(CallExpr::arg_range Args) {
-  auto firstDefaultArg = std::find_if(Args.begin(), Args.end(), [](auto it) {
-    return isa<CXXDefaultArgExpr>(it);
+  auto FirstDefaultArg = std::find_if(Args.begin(), Args.end(), [](auto It) {
+    return isa<CXXDefaultArgExpr>(It);
   });
-  return llvm::make_range(Args.begin(), firstDefaultArg);
+  return llvm::make_range(Args.begin(), FirstDefaultArg);
 }
 
 static syntax::NodeKind getOperatorNodeKind(const CXXOperatorCallExpr &E) {
@@ -558,7 +558,7 @@ private:
       assert(A.getTokenBuffer().expandedTokens().back().kind() == tok::eof);
       // Create all leaf nodes.
       // Note that we do not have 'eof' in the tree.
-      for (auto &T : A.getTokenBuffer().expandedTokens().drop_back()) {
+      for (const auto &T : A.getTokenBuffer().expandedTokens().drop_back()) {
         auto *L = new (A.getAllocator()) syntax::Leaf(&T);
         L->Original = true;
         L->CanModify = A.getTokenBuffer().spelledForExpanded(T).hasValue();
@@ -954,12 +954,12 @@ public:
   bool TraverseNestedNameSpecifierLoc(NestedNameSpecifierLoc QualifierLoc) {
     if (!QualifierLoc)
       return true;
-    for (auto it = QualifierLoc; it; it = it.getPrefix()) {
-      auto *NS = buildNameSpecifier(it);
+    for (auto It = QualifierLoc; It; It = It.getPrefix()) {
+      auto *NS = buildNameSpecifier(It);
       if (!NS)
         return false;
       Builder.markChild(NS, syntax::NodeRole::ListElement);
-      Builder.markChildToken(it.getEndLoc(), syntax::NodeRole::ListDelimiter);
+      Builder.markChildToken(It.getEndLoc(), syntax::NodeRole::ListDelimiter);
     }
     Builder.foldNode(Builder.getRange(QualifierLoc.getSourceRange()),
                      new (allocator()) syntax::NestedNameSpecifier,
@@ -1126,7 +1126,7 @@ public:
   syntax::CallArguments *
   buildCallArguments(CallExpr::arg_range ArgsAndDefaultArgs) {
     auto Args = dropDefaultArgs(ArgsAndDefaultArgs);
-    for (const auto &Arg : Args) {
+    for (auto *Arg : Args) {
       Builder.markExprChild(Arg, syntax::NodeRole::ListElement);
       const auto *DelimiterToken =
           std::next(Builder.findToken(Arg->getEndLoc()));

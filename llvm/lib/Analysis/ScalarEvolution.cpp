@@ -6344,6 +6344,14 @@ const SCEV *ScalarEvolution::createSCEV(Value *V) {
 
     if (auto *II = dyn_cast<IntrinsicInst>(U)) {
       switch (II->getIntrinsicID()) {
+      case Intrinsic::abs: {
+        const SCEV *Op = getSCEV(II->getArgOperand(0));
+        SCEV::NoWrapFlags Flags =
+            cast<ConstantInt>(II->getArgOperand(1))->isOne()
+                ? SCEV::FlagNSW
+                : SCEV::FlagAnyWrap;
+        return getSMaxExpr(Op, getNegativeSCEV(Op, Flags));
+      }
       case Intrinsic::umax:
         return getUMaxExpr(getSCEV(II->getArgOperand(0)),
                            getSCEV(II->getArgOperand(1)));
@@ -6356,6 +6364,18 @@ const SCEV *ScalarEvolution::createSCEV(Value *V) {
       case Intrinsic::smin:
         return getSMinExpr(getSCEV(II->getArgOperand(0)),
                            getSCEV(II->getArgOperand(1)));
+      case Intrinsic::usub_sat: {
+        const SCEV *X = getSCEV(II->getArgOperand(0));
+        const SCEV *Y = getSCEV(II->getArgOperand(1));
+        const SCEV *ClampedY = getUMinExpr(X, Y);
+        return getMinusSCEV(X, ClampedY, SCEV::FlagNUW);
+      }
+      case Intrinsic::uadd_sat: {
+        const SCEV *X = getSCEV(II->getArgOperand(0));
+        const SCEV *Y = getSCEV(II->getArgOperand(1));
+        const SCEV *ClampedX = getUMinExpr(X, getNotSCEV(Y));
+        return getAddExpr(ClampedX, Y, SCEV::FlagNUW);
+      }
       default:
         break;
       }
@@ -6392,8 +6412,9 @@ unsigned ScalarEvolution::getSmallConstantTripCount(const Loop *L) {
   return 0;
 }
 
-unsigned ScalarEvolution::getSmallConstantTripCount(const Loop *L,
-                                                    BasicBlock *ExitingBlock) {
+unsigned
+ScalarEvolution::getSmallConstantTripCount(const Loop *L,
+                                           const BasicBlock *ExitingBlock) {
   assert(ExitingBlock && "Must pass a non-null exiting block!");
   assert(L->isLoopExiting(ExitingBlock) &&
          "Exiting block must actually branch out of the loop!");
@@ -6430,7 +6451,7 @@ unsigned ScalarEvolution::getSmallConstantTripMultiple(const Loop *L) {
 /// that control exits the loop via ExitingBlock.
 unsigned
 ScalarEvolution::getSmallConstantTripMultiple(const Loop *L,
-                                              BasicBlock *ExitingBlock) {
+                                              const BasicBlock *ExitingBlock) {
   assert(ExitingBlock && "Must pass a non-null exiting block!");
   assert(L->isLoopExiting(ExitingBlock) &&
          "Exiting block must actually branch out of the loop!");
@@ -6461,7 +6482,7 @@ ScalarEvolution::getSmallConstantTripMultiple(const Loop *L,
 }
 
 const SCEV *ScalarEvolution::getExitCount(const Loop *L,
-                                          BasicBlock *ExitingBlock,
+                                          const BasicBlock *ExitingBlock,
                                           ExitCountKind Kind) {
   switch (Kind) {
   case Exact:
@@ -6790,7 +6811,7 @@ ScalarEvolution::BackedgeTakenInfo::getExact(const Loop *L, ScalarEvolution *SE,
 
 /// Get the exact not taken count for this loop exit.
 const SCEV *
-ScalarEvolution::BackedgeTakenInfo::getExact(BasicBlock *ExitingBlock,
+ScalarEvolution::BackedgeTakenInfo::getExact(const BasicBlock *ExitingBlock,
                                              ScalarEvolution *SE) const {
   for (auto &ENT : ExitNotTaken)
     if (ENT.ExitingBlock == ExitingBlock && ENT.hasAlwaysTruePredicate())
@@ -6800,7 +6821,7 @@ ScalarEvolution::BackedgeTakenInfo::getExact(BasicBlock *ExitingBlock,
 }
 
 const SCEV *
-ScalarEvolution::BackedgeTakenInfo::getMax(BasicBlock *ExitingBlock,
+ScalarEvolution::BackedgeTakenInfo::getMax(const BasicBlock *ExitingBlock,
                                            ScalarEvolution *SE) const {
   for (auto &ENT : ExitNotTaken)
     if (ENT.ExitingBlock == ExitingBlock && ENT.hasAlwaysTruePredicate())
@@ -9293,6 +9314,24 @@ bool ScalarEvolution::isKnownPredicateViaNoOverflow(ICmpInst::Predicate Pred,
     if (MatchBinaryAddToConst(LHS, RHS, C, SCEV::FlagNSW) && C.isNegative())
       return true;
     break;
+
+  case ICmpInst::ICMP_UGE:
+    std::swap(LHS, RHS);
+    LLVM_FALLTHROUGH;
+  case ICmpInst::ICMP_ULE:
+    // X u<= (X + C)<nuw> for any C
+    if (MatchBinaryAddToConst(RHS, LHS, C, SCEV::FlagNUW))
+      return true;
+    break;
+
+  case ICmpInst::ICMP_UGT:
+    std::swap(LHS, RHS);
+    LLVM_FALLTHROUGH;
+  case ICmpInst::ICMP_ULT:
+    // X u< (X + C)<nuw> if C != 0
+    if (MatchBinaryAddToConst(RHS, LHS, C, SCEV::FlagNUW) && !C.isNullValue())
+      return true;
+    break;
   }
 
   return false;
@@ -9719,7 +9758,22 @@ bool ScalarEvolution::isImpliedCond(ICmpInst::Predicate Pred, const SCEV *LHS,
 
           if (isImpliedCondOperands(Pred, LHS, RHS, V, getConstant(Min)))
             return true;
+          break;
+
+        // `LHS < RHS` and `LHS <= RHS` are handled in the same way as `RHS > LHS` and `RHS >= LHS` respectively.
+        case ICmpInst::ICMP_SLE:
+        case ICmpInst::ICMP_ULE:
+          if (isImpliedCondOperands(CmpInst::getSwappedPredicate(Pred), RHS,
+                                    LHS, V, getConstant(SharperMin)))
+            return true;
           LLVM_FALLTHROUGH;
+
+        case ICmpInst::ICMP_SLT:
+        case ICmpInst::ICMP_ULT:
+          if (isImpliedCondOperands(CmpInst::getSwappedPredicate(Pred), RHS,
+                                    LHS, V, getConstant(Min)))
+            return true;
+          break;
 
         default:
           // No change

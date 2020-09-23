@@ -111,6 +111,8 @@
 ; CHECK-NEXT:         Loop Pass Manager
 ; CHECK-NEXT:           Rotate Loops
 ; CHECK-NEXT:         Memory SSA
+; CHECK-NEXT:         Lazy Branch Probability Analysis
+; CHECK-NEXT:         Lazy Block Frequency Analysis
 ; CHECK-NEXT:         Loop Pass Manager
 ; CHECK-NEXT:           Loop Invariant Code Motion
 ; CHECK-NEXT:           Unswitch loops
@@ -167,6 +169,8 @@
 ; CHECK-NEXT:         Loop-Closed SSA Form Pass
 ; CHECK-NEXT:         Function Alias Analysis Results
 ; CHECK-NEXT:         Scalar Evolution Analysis
+; CHECK-NEXT:         Lazy Branch Probability Analysis
+; CHECK-NEXT:         Lazy Block Frequency Analysis
 ; CHECK-NEXT:         Loop Pass Manager
 ; CHECK-NEXT:           Loop Invariant Code Motion
 ; CHECK-NEXT:         Post-Dominator Tree Construction
@@ -269,10 +273,10 @@
 ; CHECK-NEXT:       LCSSA Verifier
 ; CHECK-NEXT:       Loop-Closed SSA Form Pass
 ; CHECK-NEXT:       Scalar Evolution Analysis
-; CHECK-NEXT:       Loop Pass Manager
-; CHECK-NEXT:         Loop Invariant Code Motion
 ; CHECK-NEXT:       Lazy Branch Probability Analysis
 ; CHECK-NEXT:       Lazy Block Frequency Analysis
+; CHECK-NEXT:       Loop Pass Manager
+; CHECK-NEXT:         Loop Invariant Code Motion
 ; CHECK-NEXT:       Optimization Remark Emitter
 ; CHECK-NEXT:       Warn about non-applied transformations
 ; CHECK-NEXT:       Alignment from assumptions
