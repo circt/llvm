@@ -14,8 +14,33 @@
 #ifndef MLIR_TESTTYPES_H
 #define MLIR_TESTTYPES_H
 
+#include <tuple>
+
 #include "mlir/IR/Diagnostics.h"
+#include "mlir/IR/Dialect.h"
+#include "mlir/IR/DialectImplementation.h"
+#include "mlir/IR/Operation.h"
 #include "mlir/IR/Types.h"
+
+namespace mlir {
+
+struct FieldInfo {
+public:
+  StringRef name;
+  Type type;
+
+  FieldInfo allocateInto(TypeStorageAllocator &alloc) const {
+    return FieldInfo{alloc.copyInto(name), type};
+  }
+};
+
+bool operator==(const FieldInfo &a, const FieldInfo &b);
+llvm::hash_code hash_value(const FieldInfo &fi);
+
+} // namespace mlir
+
+#define GET_TYPEDEF_CLASSES
+#include "TestTypeDefs.h.inc"
 
 namespace mlir {
 
