@@ -2369,7 +2369,7 @@ class TypeDef<Dialect owningdialect, string name> {
   // Name of storage class to generate or use
   string storageClass = name # "TypeStorage";
   // Namespace (withing dialect c++ namespace) in which the storage class
-  // resides
+  // resides.
   string storageNamespace = "detail";
   // Should we generate the storage class? (Or use an existing one?)
   bit genStorageClass = 1;
