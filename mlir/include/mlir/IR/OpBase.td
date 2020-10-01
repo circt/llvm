@@ -2368,15 +2368,16 @@ class TypeDef<Dialect owningdialect, string name> {
 
   // Name of storage class to generate or use
   string storageClass = name # "TypeStorage";
-  // Namespace (withing dialect c++ namespace) in which the storage class resides
+  // Namespace (withing dialect c++ namespace) in which the storage class
+  // resides
   string storageNamespace = "detail";
   // Should we generate the storage class? (Or use an existing one?)
   bit genStorageClass = 1;
   // Should we generate the storage class constructor?
   bit hasStorageCustomConstructor = 0;
 
-  // This is the list of fields in the storage class (and list of parameters
-  // in the creation functions). If empty, don't use or generate a storage class.
+  // This is the list of fields in the storage class (and list of parameters in
+  // the creation functions). If empty, don't use or generate a storage class.
   dag parameters = (ins);
 
   // Use the lowercased name as the keyword for parsing/printing. Specify only
@@ -2393,7 +2394,8 @@ class TypeDef<Dialect owningdialect, string name> {
 
   // If set, generate accessors for each Type parameter.
   bit genAccessors = 1;
-  // Generate the verifyConstructionInvariants declaration and getChecked method.
+  // Generate the verifyConstructionInvariants declaration and getChecked
+  // method.
   bit genVerifyInvariantsDecl = 0;
   // Extra code to include in the class declaration
   code extraClassDeclaration = [{}];
@@ -2413,25 +2415,29 @@ class TypeParameter<string type, string desc> {
 }
 
 // For StringRefs, which require allocation
-class StringRefParameter<string desc> : TypeParameter<"::llvm::StringRef", desc> {
+class StringRefParameter<string desc> :
+    TypeParameter<"::llvm::StringRef", desc> {
   let allocator = [{$_dst = $_allocator.copyInto($_self);}];
 }
 
 // For standard ArrayRefs, which require allocation
-class ArrayRefParameter<string arrayOf, string desc> : TypeParameter<"::llvm::ArrayRef<" # arrayOf # ">", desc> {
+class ArrayRefParameter<string arrayOf, string desc> :
+    TypeParameter<"::llvm::ArrayRef<" # arrayOf # ">", desc> {
   let allocator = [{$_dst = $_allocator.copyInto($_self);}];
 }
 
 // For classes which require allocation and have their own allocateInto method
-class SelfAllocationParameter<string type, string desc> : TypeParameter<type, desc> {
+class SelfAllocationParameter<string type, string desc> :
+    TypeParameter<type, desc> {
   let allocator = [{$_dst = $_self.allocateInto($_allocator);}];
 }
 
 // For ArrayRefs which contain things which allocate themselves
-class ArrayRefOfSelfAllocationParameter<string arrayOf, string desc> : TypeParameter<"::llvm::ArrayRef<" # arrayOf # ">", desc> {
+class ArrayRefOfSelfAllocationParameter<string arrayOf, string desc> :
+    TypeParameter<"::llvm::ArrayRef<" # arrayOf # ">", desc> {
   let allocator = [{
     llvm::SmallVector<}] # arrayOf # [{, 4> tmpFields;
-    for (size_t i = 0; i < $_self.size(); i++) {
+    for (size_t i = 0, e = $_self.size(); i < e; i++) {
       tmpFields.push_back($_self[i].allocateInto($_allocator));
     }
     $_dst = $_allocator.copyInto(ArrayRef<}] # arrayOf # [{>(tmpFields));
