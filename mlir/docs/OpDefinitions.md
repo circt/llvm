@@ -746,9 +746,9 @@ when generating the C++ code for the format. The `UserDirective` is an
 identifier used as a suffix to these two calls, i.e., `custom<MyDirective>(...)`
 would result in calls to `parseMyDirective` and `printMyDirective` wihtin the
 parser and printer respectively. `Params` may be any combination of variables
-(i.e. Attribute, Operand, Successor, etc.) and type directives. The type
-directives must refer to a variable, but that variable need not also be a
-parameter to the custom directive.
+(i.e. Attribute, Operand, Successor, etc.), type directives, and `attr-dict`.
+The type directives must refer to a variable, but that variable need not also
+be a parameter to the custom directive.
 
 The arguments to the `parse<UserDirective>` method is firstly a reference to the
 `OpAsmParser`(`OpAsmParser &`), and secondly a set of output parameters

@@ -845,7 +845,8 @@ static void genCustomParameterParser(Element &param, OpMethodBody &body) {
   body << ", ";
   if (auto *attr = dyn_cast<AttributeVariable>(&param)) {
     body << attr->getVar()->name << "Attr";
-
+  } else if (auto *attrDict = dyn_cast<AttrDictDirective>(&param)) {
+    body << "result.attributes";
   } else if (auto *operand = dyn_cast<OperandVariable>(&param)) {
     StringRef name = operand->getVar()->name;
     ArgumentLengthKind lengthKind = getArgumentLengthKind(operand->getVar());
@@ -1478,7 +1479,8 @@ static void genCustomDirectivePrinter(CustomDirective *customDir,
     body << ", ";
     if (auto *attr = dyn_cast<AttributeVariable>(&param)) {
       body << attr->getVar()->name << "Attr()";
-
+    } else if (auto *attrDict = dyn_cast<AttrDictDirective>(&param)) {
+      body << "this";
     } else if (auto *operand = dyn_cast<OperandVariable>(&param)) {
       body << operand->getVar()->name << "()";
 
@@ -2735,8 +2737,9 @@ LogicalResult FormatParser::parseCustomDirectiveParameter(
     return ::mlir::failure();
 
   // Verify that the element can be placed within a custom directive.
-  if (!isa<TypeRefDirective, TypeDirective, AttributeVariable, OperandVariable,
-           RegionVariable, SuccessorVariable>(parameters.back().get())) {
+  if (!isa<TypeRefDirective, TypeDirective, AttrDictDirective,
+           AttributeVariable, OperandVariable, RegionVariable,
+           SuccessorVariable>(parameters.back().get())) {
     return emitError(childLoc, "only variables and types may be used as "
                                "parameters to a custom directive");
   }
