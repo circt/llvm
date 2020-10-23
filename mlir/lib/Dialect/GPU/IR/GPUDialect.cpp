@@ -831,7 +831,8 @@ static ParseResult parseAsyncDependencies(
                                  OpAsmParser::Delimiter::OptionalSquare);
 }
 
-static void printAsyncDependencies(OpAsmPrinter &printer, Type asyncTokenType,
+static void printAsyncDependencies(OpAsmPrinter &printer, Operation *op,
+                                   Type asyncTokenType,
                                    OperandRange asyncDependencies) {
   if (asyncTokenType)
     printer << "async ";

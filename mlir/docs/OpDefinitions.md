@@ -750,8 +750,8 @@ parser and printer respectively. `Params` may be any combination of variables
 The type directives must refer to a variable, but that variable need not also
 be a parameter to the custom directive.
 
-The arguments to the `parse<UserDirective>` method is firstly a reference to the
-`OpAsmParser`(`OpAsmParser &`), and secondly a set of output parameters
+The arguments to the `parse<UserDirective>` method are firstly a reference to
+the `OpAsmParser`(`OpAsmParser &`), and secondly a set of output parameters
 corresponding to the parameters specified in the format. The mapping of
 declarative parameter to `parse` method argument is detailed below:
 
@@ -776,14 +776,17 @@ declarative parameter to `parse` method argument is detailed below:
     -   Single: `Type`
     -   Optional: `Type`
     -   Variadic: `const SmallVectorImpl<Type> &`
+*   `attr-dict` Directive: `NamedAttrList &`
 
 When a variable is optional, the value should only be specified if the variable
 is present. Otherwise, the value should remain `None` or null.
 
-The arguments to the `print<UserDirective>` method is firstly a reference to the
-`OpAsmPrinter`(`OpAsmPrinter &`), and secondly a set of output parameters
-corresponding to the parameters specified in the format. The mapping of
-declarative parameter to `print` method argument is detailed below:
+The arguments to the `print<UserDirective>` method is firstly a reference to
+the `OpAsmPrinter`(`OpAsmPrinter &`), second a reference to the op (e.g.
+`FooOp &op` which can be `Operation *op` alternatively), and finally a set of
+output parameters corresponding to the parameters specified in the format.
+The mapping of declarative parameter to `print` method argument is detailed
+below:
 
 *   Attribute Variables
     -   Single: `<Attribute-Storage-Type>(e.g. Attribute)`
@@ -806,6 +809,7 @@ declarative parameter to `print` method argument is detailed below:
     -   Single: `Type`
     -   Optional: `Type`
     -   Variadic: `TypeRange`
+*   `attr-dict` Directive: `NamedAttrList`
 
 When a variable is optional, the provided value may be null.
 

@@ -1474,13 +1474,15 @@ static void genLiteralPrinter(StringRef value, OpMethodBody &body,
 /// the previous element was a punctuation literal.
 static void genCustomDirectivePrinter(CustomDirective *customDir,
                                       OpMethodBody &body) {
-  body << "  print" << customDir->getName() << "(p";
+  body << "  print" << customDir->getName() << "(p, *this";
   for (Element &param : customDir->getArguments()) {
     body << ", ";
     if (auto *attr = dyn_cast<AttributeVariable>(&param)) {
       body << attr->getVar()->name << "Attr()";
+
     } else if (auto *attrDict = dyn_cast<AttrDictDirective>(&param)) {
-      body << "this";
+      body << "this->getAttrs()";
+
     } else if (auto *operand = dyn_cast<OperandVariable>(&param)) {
       body << operand->getVar()->name << "()";
 
