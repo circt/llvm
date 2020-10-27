@@ -782,11 +782,10 @@ When a variable is optional, the value should only be specified if the variable
 is present. Otherwise, the value should remain `None` or null.
 
 The arguments to the `print<UserDirective>` method is firstly a reference to
-the `OpAsmPrinter`(`OpAsmPrinter &`), second a reference to the op (e.g.
-`FooOp &op` which can be `Operation *op` alternatively), and finally a set of
-output parameters corresponding to the parameters specified in the format.
-The mapping of declarative parameter to `print` method argument is detailed
-below:
+the `OpAsmPrinter`(`OpAsmPrinter &`), second the op (e.g. `FooOp op` which
+can be `Operation *op` alternatively), and finally a set of output parameters
+corresponding to the parameters specified in the format. The mapping of
+declarative parameter to `print` method argument is detailed below:
 
 *   Attribute Variables
     -   Single: `<Attribute-Storage-Type>(e.g. Attribute)`
@@ -809,7 +808,7 @@ below:
     -   Single: `Type`
     -   Optional: `Type`
     -   Variadic: `TypeRange`
-*   `attr-dict` Directive: `NamedAttrList`
+*   `attr-dict` Directive: `const MutableDictionaryAttr&`
 
 When a variable is optional, the provided value may be null.
 

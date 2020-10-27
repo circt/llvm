@@ -1481,7 +1481,10 @@ static void genCustomDirectivePrinter(CustomDirective *customDir,
       body << attr->getVar()->name << "Attr()";
 
     } else if (isa<AttrDictDirective>(&param)) {
-      body << "getOperation()->getMutableAttrDict()";
+      // Enforce the const-ness since getMutableAttrDict() returns a reference
+      // into the Operations `attr` member.
+      body << "(const "
+              "MutableDictionaryAttr&)getOperation()->getMutableAttrDict()";
 
     } else if (auto *operand = dyn_cast<OperandVariable>(&param)) {
       body << operand->getVar()->name << "()";
