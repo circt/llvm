@@ -450,9 +450,9 @@ static void printCustomDirectiveAttributes(OpAsmPrinter &printer, Operation *,
     printer << ", " << optAttribute;
 }
 
-static void printCustomDirectiveAttrDict(OpAsmPrinter &printer, Operation *,
-                                         NamedAttrList attrs) {
-  printer.printOptionalAttrDict(attrs);
+static void printCustomDirectiveAttrDict(OpAsmPrinter &printer, Operation *op,
+                                         MutableDictionaryAttr attrs) {
+  printer.printOptionalAttrDict(attrs.getAttrs());
 }
 //===----------------------------------------------------------------------===//
 // Test IsolatedRegionOp - parse passthrough region arguments.

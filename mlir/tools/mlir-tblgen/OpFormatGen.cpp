@@ -845,7 +845,7 @@ static void genCustomParameterParser(Element &param, OpMethodBody &body) {
   body << ", ";
   if (auto *attr = dyn_cast<AttributeVariable>(&param)) {
     body << attr->getVar()->name << "Attr";
-  } else if (auto *attrDict = dyn_cast<AttrDictDirective>(&param)) {
+  } else if (isa<AttrDictDirective>(&param)) {
     body << "result.attributes";
   } else if (auto *operand = dyn_cast<OperandVariable>(&param)) {
     StringRef name = operand->getVar()->name;
@@ -1480,8 +1480,8 @@ static void genCustomDirectivePrinter(CustomDirective *customDir,
     if (auto *attr = dyn_cast<AttributeVariable>(&param)) {
       body << attr->getVar()->name << "Attr()";
 
-    } else if (auto *attrDict = dyn_cast<AttrDictDirective>(&param)) {
-      body << "this->getAttrs()";
+    } else if (isa<AttrDictDirective>(&param)) {
+      body << "getOperation()->getMutableAttrDict()";
 
     } else if (auto *operand = dyn_cast<OperandVariable>(&param)) {
       body << operand->getVar()->name << "()";
