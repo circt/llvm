@@ -6,6 +6,11 @@ include "mlir/IR/OpBase.td"
 // DECL: #ifdef GET_TYPEDEF_CLASSES
 // DECL: #undef GET_TYPEDEF_CLASSES
 
+// DECL: namespace mlir {
+// DECL: class DialectAsmParser;
+// DECL: class DialectAsmPrinter;
+// DECL: } // namespace mlir
+
 // DECL: ::mlir::Type generatedTypeParser(::mlir::MLIRContext* ctxt, ::mlir::DialectAsmParser& parser, ::llvm::StringRef mnenomic);
 // DECL: ::mlir::LogicalResult generatedTypePrinter(::mlir::Type type, ::mlir::DialectAsmPrinter& printer);
 
@@ -50,8 +55,8 @@ def B_CompoundTypeA : TestType<"CompoundA"> {
   let genVerifyInvariantsDecl = 1;
 
 // DECL-LABEL: class CompoundAType: public ::mlir::Type
-// DECL: static ::mlir::LogicalResult verifyConstructionInvariants(Location loc, int widthOfSomething, ::mlir::test::SimpleTypeA exampleTdType, SomeCppStruct exampleCppType, ::llvm::ArrayRef<int> dims);
-// DECL: static ::mlir::Type getChecked(Location loc, int widthOfSomething, ::mlir::test::SimpleTypeA exampleTdType, SomeCppStruct exampleCppType, ::llvm::ArrayRef<int> dims);
+// DECL: static ::mlir::LogicalResult verifyConstructionInvariants(::mlir::Location loc, int widthOfSomething, ::mlir::test::SimpleTypeA exampleTdType, SomeCppStruct exampleCppType, ::llvm::ArrayRef<int> dims);
+// DECL: static ::mlir::Type getChecked(::mlir::Location loc, int widthOfSomething, ::mlir::test::SimpleTypeA exampleTdType, SomeCppStruct exampleCppType, ::llvm::ArrayRef<int> dims);
 // DECL: static ::llvm::StringRef getMnemonic() { return "cmpnd_a"; }
 // DECL: static ::mlir::Type parse(::mlir::MLIRContext* ctxt, ::mlir::DialectAsmParser& parser);
 // DECL: void print(::mlir::DialectAsmPrinter& printer) const;
