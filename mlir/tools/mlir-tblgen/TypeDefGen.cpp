@@ -174,8 +174,8 @@ static const char *const typeDefParsePrint = R"(
 ///
 /// {0}: List of parameters, parameters style.
 static const char *const typeDefDeclVerifyStr = R"(
-    static ::mlir::LogicalResult verifyConstructionInvariants(Location loc{0});
-    static ::mlir::Type getChecked(Location loc{0});
+    static ::mlir::LogicalResult verifyConstructionInvariants(::mlir::Location loc{0});
+    static ::mlir::Type getChecked(::mlir::Location loc{0});
 )";
 
 /// Generate the declaration for the given typeDef class.
