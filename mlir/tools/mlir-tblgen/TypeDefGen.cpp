@@ -133,6 +133,15 @@ private:
 // GEN: TypeDef declarations
 //===----------------------------------------------------------------------===//
 
+/// Print this above all the other declarations. Contains type declarations used
+/// later on.
+static const char *const typeDefDeclHeader = R"(
+namespace mlir {
+class DialectAsmParser;
+class DialectAsmPrinter;
+} // namespace mlir
+)";
+
 /// The code block for the start of a typeDef class declaration -- singleton
 /// case.
 ///
@@ -239,6 +248,10 @@ static bool emitTypeDefDecls(const llvm::RecordKeeper &recordKeeper,
   findAllTypeDefs(recordKeeper, typeDefs);
 
   IfDefScope scope("GET_TYPEDEF_CLASSES", os);
+
+  // Output the common "header".
+  os << typeDefDeclHeader;
+
   if (typeDefs.size() > 0) {
     NamespaceEmitter nsEmitter(os, typeDefs.begin()->getDialect());
 
