@@ -39,6 +39,10 @@ def A_SimpleTypeA : TestType<"SimpleA"> {
 // DECL: class SimpleAType: public ::mlir::Type
 }
 
+def RTLValueType : Type<CPred<"isRTLValueType($_self)">, "Type"> {
+  string cppType = "::mlir::Type";
+}
+
 // A more complex parameterized type
 def B_CompoundTypeA : TestType<"CompoundA"> {
   let summary = "A more complex parameterized type";
@@ -49,14 +53,15 @@ def B_CompoundTypeA : TestType<"CompoundA"> {
       "int":$widthOfSomething,
       "::mlir::test::SimpleTypeA": $exampleTdType,
       "SomeCppStruct": $exampleCppType,
-      ArrayRefParameter<"int", "Matrix dimensions">:$dims
+      ArrayRefParameter<"int", "Matrix dimensions">:$dims,
+      RTLValueType:$inner
   );
 
   let genVerifyInvariantsDecl = 1;
 
 // DECL-LABEL: class CompoundAType: public ::mlir::Type
-// DECL: static ::mlir::LogicalResult verifyConstructionInvariants(::mlir::Location loc, int widthOfSomething, ::mlir::test::SimpleTypeA exampleTdType, SomeCppStruct exampleCppType, ::llvm::ArrayRef<int> dims);
-// DECL: static ::mlir::Type getChecked(::mlir::Location loc, int widthOfSomething, ::mlir::test::SimpleTypeA exampleTdType, SomeCppStruct exampleCppType, ::llvm::ArrayRef<int> dims);
+// DECL: static ::mlir::LogicalResult verifyConstructionInvariants(::mlir::Location loc, int widthOfSomething, ::mlir::test::SimpleTypeA exampleTdType, SomeCppStruct exampleCppType, ::llvm::ArrayRef<int> dims, ::mlir::Type inner);
+// DECL: static ::mlir::Type getChecked(::mlir::Location loc, int widthOfSomething, ::mlir::test::SimpleTypeA exampleTdType, SomeCppStruct exampleCppType, ::llvm::ArrayRef<int> dims, ::mlir::Type inner);
 // DECL: static ::llvm::StringRef getMnemonic() { return "cmpnd_a"; }
 // DECL: static ::mlir::Type parse(::mlir::MLIRContext* ctxt, ::mlir::DialectAsmParser& parser);
 // DECL: void print(::mlir::DialectAsmPrinter& printer) const;
