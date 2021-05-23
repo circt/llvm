@@ -164,6 +164,10 @@ MlirModule mlirModuleCreateParse(MlirContext context, MlirStringRef module) {
   return MlirModule{owning.release().getOperation()};
 }
 
+MlirModule mlirModuleClone(MlirModule module) {
+  return wrap(unwrap(module).clone());
+}
+
 MlirContext mlirModuleGetContext(MlirModule module) {
   return wrap(unwrap(module).getContext());
 }
@@ -311,6 +315,10 @@ MlirOperation mlirOperationCreate(MlirOperationState *state) {
 
   MlirOperation result = wrap(Operation::create(cppState));
   return result;
+}
+
+MlirOperation mlirOperationClone(MlirOperation op) {
+  return wrap(unwrap(op)->clone());
 }
 
 void mlirOperationDestroy(MlirOperation op) { unwrap(op)->erase(); }

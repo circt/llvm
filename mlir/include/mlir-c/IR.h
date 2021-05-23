@@ -194,6 +194,9 @@ MLIR_CAPI_EXPORTED MlirModule mlirModuleCreateEmpty(MlirLocation location);
 MLIR_CAPI_EXPORTED MlirModule mlirModuleCreateParse(MlirContext context,
                                                     MlirStringRef module);
 
+/// Creates a deep copy of a module
+MLIR_CAPI_EXPORTED MlirModule mlirModuleClone(MlirModule module);
+
 /// Gets the context that a module was created with.
 MLIR_CAPI_EXPORTED MlirContext mlirModuleGetContext(MlirModule module);
 
@@ -325,6 +328,9 @@ mlirOpPrintingFlagsUseLocalScope(MlirOpPrintingFlags flags);
 /// return a null operation and emit diagnostics:
 ///   - Result type inference is enabled and cannot be performed.
 MLIR_CAPI_EXPORTED MlirOperation mlirOperationCreate(MlirOperationState *state);
+
+/// Creates a deep copy of an operatioon
+MLIR_CAPI_EXPORTED MlirOperation mlirOperationClone(MlirOperation module);
 
 /// Takes an operation owned by the caller and destroys it.
 MLIR_CAPI_EXPORTED void mlirOperationDestroy(MlirOperation op);

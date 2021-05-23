@@ -1619,6 +1619,61 @@ int testOperands() {
   return 0;
 }
 
+intptr_t countOperations(MlirBlock block) {
+  intptr_t count = 0;
+  MlirOperation op = mlirBlockGetFirstOperation(block);
+  while (!mlirOperationIsNull(op)) {
+    op = mlirOperationGetNextInBlock(op);
+    count++;
+  }
+  return count;
+}
+
+/// Tests operand APIs.
+int testClone() {
+  fprintf(stderr, "@testClone\n");
+  // CHECK-LABEL: @testClone
+
+  MlirContext ctx = mlirContextCreate();
+  MlirLocation loc = mlirLocationUnknownGet(ctx);
+  MlirModule module = mlirModuleCreateEmpty(loc);
+  MlirBlock body = mlirModuleGetBody(module);
+  MlirType indexType = mlirIndexTypeGet(ctx);
+
+  // Create a constant
+  MlirAttribute indexOneLiteral =
+      mlirAttributeParseGet(ctx, mlirStringRefCreateFromCString("1 : index"));
+  MlirNamedAttribute indexOneValueAttr = mlirNamedAttributeGet(
+      mlirIdentifierGet(ctx, mlirStringRefCreateFromCString("value")),
+      indexOneLiteral);
+  MlirOperationState constOneState = mlirOperationStateGet(
+      mlirStringRefCreateFromCString("std.constant"), loc);
+  mlirOperationStateAddResults(&constOneState, 1, &indexType);
+  mlirOperationStateAddAttributes(&constOneState, 1, &indexOneValueAttr);
+  MlirOperation constOne = mlirOperationCreate(&constOneState);
+  
+  // Replace the original const one with a clone and destroy the original
+  MlirOperation evilConstOne = mlirOperationClone(constOne);
+  mlirOperationDestroy(constOne);
+  constOne = evilConstOne;
+
+  // Check that modifying a module does not modify its clone
+  MlirModule moduleClone = mlirModuleClone(module);
+  MlirBlock cloneBody = mlirModuleGetBody(moduleClone);
+  mlirBlockAppendOwnedOperation(body, constOne);
+
+  fprintf(stderr, "Module operation count: %ld\n", countOperations(body));
+  fprintf(stderr, "Clone operation count: %ld\n", countOperations(cloneBody));
+  // CHECK: Module operation count: 1
+  // CHECK: Clone operation count: 0
+
+  mlirModuleDestroy(moduleClone);
+  mlirOperationDestroy(constOne);
+  mlirContextDestroy(ctx);
+
+  return 0;
+}
+
 // Wraps a diagnostic into additional text we can match against.
 MlirLogicalResult errorHandler(MlirDiagnostic diagnostic, void *userData) {
   fprintf(stderr, "processing diagnostic (userData: %ld) <<\n", (long)userData);
@@ -1698,6 +1753,8 @@ int main() {
     return 10;
   if (testOperands())
     return 11;
+  if (testClone())
+    return 12;
 
   mlirContextDestroy(ctx);
 
