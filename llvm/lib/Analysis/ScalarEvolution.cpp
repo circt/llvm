@@ -2585,8 +2585,7 @@ const SCEV *ScalarEvolution::getAddExpr(SmallVectorImpl<const SCEV *> &Ops,
       }
 
       if (PreservedFlags != SCEV::FlagAnyWrap) {
-        SmallVector<const SCEV *, 4> NewOps(AddExpr->op_begin(),
-                                            AddExpr->op_end());
+        SmallVector<const SCEV *, 4> NewOps(AddExpr->operands());
         NewOps[0] = getConstant(ConstAdd);
         return getAddExpr(NewOps, PreservedFlags);
       }
@@ -11582,6 +11581,62 @@ ScalarEvolution::howManyLessThans(const SCEV *LHS, const SCEV *RHS,
   const SCEVAddRecExpr *IV = dyn_cast<SCEVAddRecExpr>(LHS);
   bool PredicatedIV = false;
 
+  auto canAssumeNoSelfWrap = [&](const SCEVAddRecExpr *AR) {
+    // Can we prove this loop *must* be UB if overflow of IV occurs?
+    // Reasoning goes as follows:
+    // * Suppose the IV did self wrap.
+    // * If Stride evenly divides the iteration space, then once wrap
+    //   occurs, the loop must revisit the same values.
+    // * We know that RHS is invariant, and that none of those values
+    //   caused this exit to be taken previously.  Thus, this exit is
+    //   dynamically dead.
+    // * If this is the sole exit, then a dead exit implies the loop
+    //   must be infinite if there are no abnormal exits.
+    // * If the loop were infinite, then it must either not be mustprogress
+    //   or have side effects. Otherwise, it must be UB.
+    // * It can't (by assumption), be UB so we have contradicted our
+    //   premise and can conclude the IV did not in fact self-wrap.
+    if (!isLoopInvariant(RHS, L))
+      return false;
+
+    auto *StrideC = dyn_cast<SCEVConstant>(AR->getStepRecurrence(*this));
+    if (!StrideC || !StrideC->getAPInt().isPowerOf2())
+      return false;
+
+    if (!ControlsExit || !loopHasNoAbnormalExits(L))
+      return false;
+
+    return loopIsFiniteByAssumption(L);
+  };
+
+  if (!IV) {
+    if (auto *ZExt = dyn_cast<SCEVZeroExtendExpr>(LHS)) {
+      const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(ZExt->getOperand());
+      if (AR && AR->getLoop() == L && AR->isAffine()) {
+        auto Flags = AR->getNoWrapFlags();
+        if (!hasFlags(Flags, SCEV::FlagNW) && canAssumeNoSelfWrap(AR)) {
+          Flags = setFlags(Flags, SCEV::FlagNW);
+
+          SmallVector<const SCEV*> Operands{AR->operands()};
+          Flags = StrengthenNoWrapFlags(this, scAddRecExpr, Operands, Flags);
+
+          setNoWrapFlags(const_cast<SCEVAddRecExpr *>(AR), Flags);
+        }
+        if (AR->hasNoUnsignedWrap()) {
+          // Emulate what getZeroExtendExpr would have done during construction
+          // if we'd been able to infer the fact just above at that time.
+          const SCEV *Step = AR->getStepRecurrence(*this);
+          Type *Ty = ZExt->getType();
+          auto *S = getAddRecExpr(
+            getExtendAddRecStart<SCEVZeroExtendExpr>(AR, Ty, this, 0),
+            getZeroExtendExpr(Step, Ty, 0), L, AR->getNoWrapFlags());
+          IV = dyn_cast<SCEVAddRecExpr>(S);
+        }
+      }
+    }
+  }
+
+
   if (!IV && AllowPredicates) {
     // Try to make this an AddRec using runtime tests, in the first X
     // iterations of this loop, where X is the SCEV expression found by the
@@ -11632,9 +11687,9 @@ ScalarEvolution::howManyLessThans(const SCEV *LHS, const SCEV *RHS,
     //
     // a) IV is either nuw or nsw depending upon signedness (indicated by the
     //    NoWrap flag).
-    // b) loop is single exit with no side effects.
-    // c) loop has no abnormal exits
-    //
+    // b) the loop is guaranteed to be finite (e.g. is mustprogress and has
+    //    no side effects within the loop)
+    // c) loop has a single static exit (with no abnormal exits)
     //
     // Precondition a) implies that if the stride is negative, this is a single
     // trip loop. The backedge taken count formula reduces to zero in this case.
@@ -11695,37 +11750,12 @@ ScalarEvolution::howManyLessThans(const SCEV *LHS, const SCEV *RHS,
     }
   } else if (!Stride->isOne() && !NoWrap) {
     auto isUBOnWrap = [&]() {
-      // Can we prove this loop *must* be UB if overflow of IV occurs?
-      // Reasoning goes as follows:
-      // * Suppose the IV did self wrap.
-      // * If Stride evenly divides the iteration space, then once wrap
-      //   occurs, the loop must revisit the same values.
-      // * We know that RHS is invariant, and that none of those values
-      //   caused this exit to be taken previously.  Thus, this exit is
-      //   dynamically dead.
-      // * If this is the sole exit, then a dead exit implies the loop
-      //   must be infinite if there are no abnormal exits.
-      // * If the loop were infinite, then it must either not be mustprogress
-      //   or have side effects. Otherwise, it must be UB.
-      // * It can't (by assumption), be UB so we have contradicted our
-      //   premise and can conclude the IV did not in fact self-wrap.
       // From no-self-wrap, we need to then prove no-(un)signed-wrap.  This
       // follows trivially from the fact that every (un)signed-wrapped, but
       // not self-wrapped value must be LT than the last value before
       // (un)signed wrap.  Since we know that last value didn't exit, nor
       // will any smaller one.
-
-      if (!isLoopInvariant(RHS, L))
-        return false;
-
-      auto *StrideC = dyn_cast<SCEVConstant>(Stride);
-      if (!StrideC || !StrideC->getAPInt().isPowerOf2())
-        return false;
-
-      if (!ControlsExit || !loopHasNoAbnormalExits(L))
-        return false;
-
-      return loopIsFiniteByAssumption(L);
+      return canAssumeNoSelfWrap(IV);
     };
 
     // Avoid proven overflow cases: this will ensure that the backedge taken
@@ -12157,237 +12187,6 @@ static inline bool containsUndefs(const SCEV *S) {
   });
 }
 
-namespace {
-
-// Collect all steps of SCEV expressions.
-struct SCEVCollectStrides {
-  ScalarEvolution &SE;
-  SmallVectorImpl<const SCEV *> &Strides;
-
-  SCEVCollectStrides(ScalarEvolution &SE, SmallVectorImpl<const SCEV *> &S)
-      : SE(SE), Strides(S) {}
-
-  bool follow(const SCEV *S) {
-    if (const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(S))
-      Strides.push_back(AR->getStepRecurrence(SE));
-    return true;
-  }
-
-  bool isDone() const { return false; }
-};
-
-// Collect all SCEVUnknown and SCEVMulExpr expressions.
-struct SCEVCollectTerms {
-  SmallVectorImpl<const SCEV *> &Terms;
-
-  SCEVCollectTerms(SmallVectorImpl<const SCEV *> &T) : Terms(T) {}
-
-  bool follow(const SCEV *S) {
-    if (isa<SCEVUnknown>(S) || isa<SCEVMulExpr>(S) ||
-        isa<SCEVSignExtendExpr>(S)) {
-      if (!containsUndefs(S))
-        Terms.push_back(S);
-
-      // Stop recursion: once we collected a term, do not walk its operands.
-      return false;
-    }
-
-    // Keep looking.
-    return true;
-  }
-
-  bool isDone() const { return false; }
-};
-
-// Check if a SCEV contains an AddRecExpr.
-struct SCEVHasAddRec {
-  bool &ContainsAddRec;
-
-  SCEVHasAddRec(bool &ContainsAddRec) : ContainsAddRec(ContainsAddRec) {
-    ContainsAddRec = false;
-  }
-
-  bool follow(const SCEV *S) {
-    if (isa<SCEVAddRecExpr>(S)) {
-      ContainsAddRec = true;
-
-      // Stop recursion: once we collected a term, do not walk its operands.
-      return false;
-    }
-
-    // Keep looking.
-    return true;
-  }
-
-  bool isDone() const { return false; }
-};
-
-// Find factors that are multiplied with an expression that (possibly as a
-// subexpression) contains an AddRecExpr. In the expression:
-//
-//  8 * (100 +  %p * %q * (%a + {0, +, 1}_loop))
-//
-// "%p * %q" are factors multiplied by the expression "(%a + {0, +, 1}_loop)"
-// that contains the AddRec {0, +, 1}_loop. %p * %q are likely to be array size
-// parameters as they form a product with an induction variable.
-//
-// This collector expects all array size parameters to be in the same MulExpr.
-// It might be necessary to later add support for collecting parameters that are
-// spread over different nested MulExpr.
-struct SCEVCollectAddRecMultiplies {
-  SmallVectorImpl<const SCEV *> &Terms;
-  ScalarEvolution &SE;
-
-  SCEVCollectAddRecMultiplies(SmallVectorImpl<const SCEV *> &T, ScalarEvolution &SE)
-      : Terms(T), SE(SE) {}
-
-  bool follow(const SCEV *S) {
-    if (auto *Mul = dyn_cast<SCEVMulExpr>(S)) {
-      bool HasAddRec = false;
-      SmallVector<const SCEV *, 0> Operands;
-      for (auto Op : Mul->operands()) {
-        const SCEVUnknown *Unknown = dyn_cast<SCEVUnknown>(Op);
-        if (Unknown && !isa<CallInst>(Unknown->getValue())) {
-          Operands.push_back(Op);
-        } else if (Unknown) {
-          HasAddRec = true;
-        } else {
-          bool ContainsAddRec = false;
-          SCEVHasAddRec ContiansAddRec(ContainsAddRec);
-          visitAll(Op, ContiansAddRec);
-          HasAddRec |= ContainsAddRec;
-        }
-      }
-      if (Operands.size() == 0)
-        return true;
-
-      if (!HasAddRec)
-        return false;
-
-      Terms.push_back(SE.getMulExpr(Operands));
-      // Stop recursion: once we collected a term, do not walk its operands.
-      return false;
-    }
-
-    // Keep looking.
-    return true;
-  }
-
-  bool isDone() const { return false; }
-};
-
-} // end anonymous namespace
-
-/// Find parametric terms in this SCEVAddRecExpr. We first for parameters in
-/// two places:
-///   1) The strides of AddRec expressions.
-///   2) Unknowns that are multiplied with AddRec expressions.
-void ScalarEvolution::collectParametricTerms(const SCEV *Expr,
-    SmallVectorImpl<const SCEV *> &Terms) {
-  SmallVector<const SCEV *, 4> Strides;
-  SCEVCollectStrides StrideCollector(*this, Strides);
-  visitAll(Expr, StrideCollector);
-
-  LLVM_DEBUG({
-    dbgs() << "Strides:\n";
-    for (const SCEV *S : Strides)
-      dbgs() << *S << "\n";
-  });
-
-  for (const SCEV *S : Strides) {
-    SCEVCollectTerms TermCollector(Terms);
-    visitAll(S, TermCollector);
-  }
-
-  LLVM_DEBUG({
-    dbgs() << "Terms:\n";
-    for (const SCEV *T : Terms)
-      dbgs() << *T << "\n";
-  });
-
-  SCEVCollectAddRecMultiplies MulCollector(Terms, *this);
-  visitAll(Expr, MulCollector);
-}
-
-static bool findArrayDimensionsRec(ScalarEvolution &SE,
-                                   SmallVectorImpl<const SCEV *> &Terms,
-                                   SmallVectorImpl<const SCEV *> &Sizes) {
-  int Last = Terms.size() - 1;
-  const SCEV *Step = Terms[Last];
-
-  // End of recursion.
-  if (Last == 0) {
-    if (const SCEVMulExpr *M = dyn_cast<SCEVMulExpr>(Step)) {
-      SmallVector<const SCEV *, 2> Qs;
-      for (const SCEV *Op : M->operands())
-        if (!isa<SCEVConstant>(Op))
-          Qs.push_back(Op);
-
-      Step = SE.getMulExpr(Qs);
-    }
-
-    Sizes.push_back(Step);
-    return true;
-  }
-
-  for (const SCEV *&Term : Terms) {
-    // Normalize the terms before the next call to findArrayDimensionsRec.
-    const SCEV *Q, *R;
-    SCEVDivision::divide(SE, Term, Step, &Q, &R);
-
-    // Bail out when GCD does not evenly divide one of the terms.
-    if (!R->isZero())
-      return false;
-
-    Term = Q;
-  }
-
-  // Remove all SCEVConstants.
-  erase_if(Terms, [](const SCEV *E) { return isa<SCEVConstant>(E); });
-
-  if (Terms.size() > 0)
-    if (!findArrayDimensionsRec(SE, Terms, Sizes))
-      return false;
-
-  Sizes.push_back(Step);
-  return true;
-}
-
-// Returns true when one of the SCEVs of Terms contains a SCEVUnknown parameter.
-static inline bool containsParameters(SmallVectorImpl<const SCEV *> &Terms) {
-  for (const SCEV *T : Terms)
-    if (SCEVExprContains(T, [](const SCEV *S) { return isa<SCEVUnknown>(S); }))
-      return true;
-
-  return false;
-}
-
-// Return the number of product terms in S.
-static inline int numberOfTerms(const SCEV *S) {
-  if (const SCEVMulExpr *Expr = dyn_cast<SCEVMulExpr>(S))
-    return Expr->getNumOperands();
-  return 1;
-}
-
-static const SCEV *removeConstantFactors(ScalarEvolution &SE, const SCEV *T) {
-  if (isa<SCEVConstant>(T))
-    return nullptr;
-
-  if (isa<SCEVUnknown>(T))
-    return T;
-
-  if (const SCEVMulExpr *M = dyn_cast<SCEVMulExpr>(T)) {
-    SmallVector<const SCEV *, 2> Factors;
-    for (const SCEV *Op : M->operands())
-      if (!isa<SCEVConstant>(Op))
-        Factors.push_back(Op);
-
-    return SE.getMulExpr(Factors);
-  }
-
-  return T;
-}
-
 /// Return the size of an element read or written by Inst.
 const SCEV *ScalarEvolution::getElementSize(Instruction *Inst) {
   Type *Ty;
@@ -12400,211 +12199,6 @@ const SCEV *ScalarEvolution::getElementSize(Instruction *Inst) {
 
   Type *ETy = getEffectiveSCEVType(PointerType::getUnqual(Ty));
   return getSizeOfExpr(ETy, Ty);
-}
-
-void ScalarEvolution::findArrayDimensions(SmallVectorImpl<const SCEV *> &Terms,
-                                          SmallVectorImpl<const SCEV *> &Sizes,
-                                          const SCEV *ElementSize) {
-  if (Terms.size() < 1 || !ElementSize)
-    return;
-
-  // Early return when Terms do not contain parameters: we do not delinearize
-  // non parametric SCEVs.
-  if (!containsParameters(Terms))
-    return;
-
-  LLVM_DEBUG({
-    dbgs() << "Terms:\n";
-    for (const SCEV *T : Terms)
-      dbgs() << *T << "\n";
-  });
-
-  // Remove duplicates.
-  array_pod_sort(Terms.begin(), Terms.end());
-  Terms.erase(std::unique(Terms.begin(), Terms.end()), Terms.end());
-
-  // Put larger terms first.
-  llvm::sort(Terms, [](const SCEV *LHS, const SCEV *RHS) {
-    return numberOfTerms(LHS) > numberOfTerms(RHS);
-  });
-
-  // Try to divide all terms by the element size. If term is not divisible by
-  // element size, proceed with the original term.
-  for (const SCEV *&Term : Terms) {
-    const SCEV *Q, *R;
-    SCEVDivision::divide(*this, Term, ElementSize, &Q, &R);
-    if (!Q->isZero())
-      Term = Q;
-  }
-
-  SmallVector<const SCEV *, 4> NewTerms;
-
-  // Remove constant factors.
-  for (const SCEV *T : Terms)
-    if (const SCEV *NewT = removeConstantFactors(*this, T))
-      NewTerms.push_back(NewT);
-
-  LLVM_DEBUG({
-    dbgs() << "Terms after sorting:\n";
-    for (const SCEV *T : NewTerms)
-      dbgs() << *T << "\n";
-  });
-
-  if (NewTerms.empty() || !findArrayDimensionsRec(*this, NewTerms, Sizes)) {
-    Sizes.clear();
-    return;
-  }
-
-  // The last element to be pushed into Sizes is the size of an element.
-  Sizes.push_back(ElementSize);
-
-  LLVM_DEBUG({
-    dbgs() << "Sizes:\n";
-    for (const SCEV *S : Sizes)
-      dbgs() << *S << "\n";
-  });
-}
-
-void ScalarEvolution::computeAccessFunctions(
-    const SCEV *Expr, SmallVectorImpl<const SCEV *> &Subscripts,
-    SmallVectorImpl<const SCEV *> &Sizes) {
-  // Early exit in case this SCEV is not an affine multivariate function.
-  if (Sizes.empty())
-    return;
-
-  if (auto *AR = dyn_cast<SCEVAddRecExpr>(Expr))
-    if (!AR->isAffine())
-      return;
-
-  const SCEV *Res = Expr;
-  int Last = Sizes.size() - 1;
-  for (int i = Last; i >= 0; i--) {
-    const SCEV *Q, *R;
-    SCEVDivision::divide(*this, Res, Sizes[i], &Q, &R);
-
-    LLVM_DEBUG({
-      dbgs() << "Res: " << *Res << "\n";
-      dbgs() << "Sizes[i]: " << *Sizes[i] << "\n";
-      dbgs() << "Res divided by Sizes[i]:\n";
-      dbgs() << "Quotient: " << *Q << "\n";
-      dbgs() << "Remainder: " << *R << "\n";
-    });
-
-    Res = Q;
-
-    // Do not record the last subscript corresponding to the size of elements in
-    // the array.
-    if (i == Last) {
-
-      // Bail out if the remainder is too complex.
-      if (isa<SCEVAddRecExpr>(R)) {
-        Subscripts.clear();
-        Sizes.clear();
-        return;
-      }
-
-      continue;
-    }
-
-    // Record the access function for the current subscript.
-    Subscripts.push_back(R);
-  }
-
-  // Also push in last position the remainder of the last division: it will be
-  // the access function of the innermost dimension.
-  Subscripts.push_back(Res);
-
-  std::reverse(Subscripts.begin(), Subscripts.end());
-
-  LLVM_DEBUG({
-    dbgs() << "Subscripts:\n";
-    for (const SCEV *S : Subscripts)
-      dbgs() << *S << "\n";
-  });
-}
-
-/// Splits the SCEV into two vectors of SCEVs representing the subscripts and
-/// sizes of an array access. Returns the remainder of the delinearization that
-/// is the offset start of the array.  The SCEV->delinearize algorithm computes
-/// the multiples of SCEV coefficients: that is a pattern matching of sub
-/// expressions in the stride and base of a SCEV corresponding to the
-/// computation of a GCD (greatest common divisor) of base and stride.  When
-/// SCEV->delinearize fails, it returns the SCEV unchanged.
-///
-/// For example: when analyzing the memory access A[i][j][k] in this loop nest
-///
-///  void foo(long n, long m, long o, double A[n][m][o]) {
-///
-///    for (long i = 0; i < n; i++)
-///      for (long j = 0; j < m; j++)
-///        for (long k = 0; k < o; k++)
-///          A[i][j][k] = 1.0;
-///  }
-///
-/// the delinearization input is the following AddRec SCEV:
-///
-///  AddRec: {{{%A,+,(8 * %m * %o)}<%for.i>,+,(8 * %o)}<%for.j>,+,8}<%for.k>
-///
-/// From this SCEV, we are able to say that the base offset of the access is %A
-/// because it appears as an offset that does not divide any of the strides in
-/// the loops:
-///
-///  CHECK: Base offset: %A
-///
-/// and then SCEV->delinearize determines the size of some of the dimensions of
-/// the array as these are the multiples by which the strides are happening:
-///
-///  CHECK: ArrayDecl[UnknownSize][%m][%o] with elements of sizeof(double) bytes.
-///
-/// Note that the outermost dimension remains of UnknownSize because there are
-/// no strides that would help identifying the size of the last dimension: when
-/// the array has been statically allocated, one could compute the size of that
-/// dimension by dividing the overall size of the array by the size of the known
-/// dimensions: %m * %o * 8.
-///
-/// Finally delinearize provides the access functions for the array reference
-/// that does correspond to A[i][j][k] of the above C testcase:
-///
-///  CHECK: ArrayRef[{0,+,1}<%for.i>][{0,+,1}<%for.j>][{0,+,1}<%for.k>]
-///
-/// The testcases are checking the output of a function pass:
-/// DelinearizationPass that walks through all loads and stores of a function
-/// asking for the SCEV of the memory access with respect to all enclosing
-/// loops, calling SCEV->delinearize on that and printing the results.
-void ScalarEvolution::delinearize(const SCEV *Expr,
-                                 SmallVectorImpl<const SCEV *> &Subscripts,
-                                 SmallVectorImpl<const SCEV *> &Sizes,
-                                 const SCEV *ElementSize) {
-  // First step: collect parametric terms.
-  SmallVector<const SCEV *, 4> Terms;
-  collectParametricTerms(Expr, Terms);
-
-  if (Terms.empty())
-    return;
-
-  // Second step: find subscript sizes.
-  findArrayDimensions(Terms, Sizes, ElementSize);
-
-  if (Sizes.empty())
-    return;
-
-  // Third step: compute the access functions for each subscript.
-  computeAccessFunctions(Expr, Subscripts, Sizes);
-
-  if (Subscripts.empty())
-    return;
-
-  LLVM_DEBUG({
-    dbgs() << "succeeded to delinearize " << *Expr << "\n";
-    dbgs() << "ArrayDecl[UnknownSize]";
-    for (const SCEV *S : Sizes)
-      dbgs() << "[" << *S << "]";
-
-    dbgs() << "\nArrayRef";
-    for (const SCEV *S : Subscripts)
-      dbgs() << "[" << *S << "]";
-    dbgs() << "\n";
-  });
 }
 
 bool ScalarEvolution::getIndexExpressionsFromGEP(
@@ -13977,7 +13571,7 @@ const SCEV *ScalarEvolution::applyLoopGuards(const SCEV *Expr, const Loop *L) {
       if (ExactRegion.isWrappedSet() || ExactRegion.isFullSet())
         return false;
       auto I = RewriteMap.find(LHSUnknown->getValue());
-      const SCEV *RewrittenLHS = I != RewriteMap.end() ? I->second : LHS;
+      const SCEV *RewrittenLHS = I != RewriteMap.end() ? I->second : LHSUnknown;
       RewriteMap[LHSUnknown->getValue()] = getUMaxExpr(
           getConstant(ExactRegion.getUnsignedMin()),
           getUMinExpr(RewrittenLHS, getConstant(ExactRegion.getUnsignedMax())));

@@ -8825,8 +8825,10 @@ void SelectionDAGBuilder::visitInlineAsm(const CallBase &Call,
           auto *R = cast<RegisterSDNode>(AsmNodeOperands[CurOp+1]);
           Register TiedReg = R->getReg();
           MVT RegVT = R->getSimpleValueType(0);
-          const TargetRegisterClass *RC = TiedReg.isVirtual() ?
-            MRI.getRegClass(TiedReg) : TRI.getMinimalPhysRegClass(TiedReg);
+          const TargetRegisterClass *RC =
+              TiedReg.isVirtual()     ? MRI.getRegClass(TiedReg)
+              : RegVT != MVT::Untyped ? TLI.getRegClassFor(RegVT)
+                                      : TRI.getMinimalPhysRegClass(TiedReg);
           unsigned NumRegs = InlineAsm::getNumOperandRegisters(OpFlag);
           for (unsigned i = 0; i != NumRegs; ++i)
             Regs.push_back(MRI.createVirtualRegister(RC));
@@ -10867,10 +10869,9 @@ void SelectionDAGBuilder::lowerWorkItem(SwitchWorkListItem W, Value *Cond,
           BTB->DefaultProb -= DefaultProb / 2;
         }
 
-        if (FallthroughUnreachable) {
-          // Skip the range check if the fallthrough block is unreachable.
+        // Skip the range check if the fallthrough block is unreachable.
+        if (FallthroughUnreachable)
           BTB->OmitRangeCheck = true;
-        }
 
         // If we're in the right place, emit the bit test header right now.
         if (CurMBB == SwitchMBB) {

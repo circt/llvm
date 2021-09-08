@@ -9643,9 +9643,10 @@ SDValue AArch64TargetLowering::LowerSPLAT_VECTOR(SDValue Op,
     // The only legal i1 vectors are SVE vectors, so we can use SVE-specific
     // lowering code.
     if (auto *ConstVal = dyn_cast<ConstantSDNode>(SplatVal)) {
+      if (ConstVal->isNullValue())
+        return SDValue(DAG.getMachineNode(AArch64::PFALSE, dl, VT), 0);
       if (ConstVal->isOne())
         return getPTrue(DAG, dl, VT, AArch64SVEPredPattern::all);
-      // TODO: Add special case for constant false
     }
     // The general case of i1.  There isn't any natural way to do this,
     // so we use some trickery with whilelo.
@@ -12189,6 +12190,33 @@ bool AArch64TargetLowering::isLegalAddImmediate(int64_t Immed) const {
   return IsLegal;
 }
 
+// Return false to prevent folding
+// (mul (add x, c1), c2) -> (add (mul x, c2), c2*c1) in DAGCombine,
+// if the folding leads to worse code.
+bool AArch64TargetLowering::isMulAddWithConstProfitable(
+    const SDValue &AddNode, const SDValue &ConstNode) const {
+  // Let the DAGCombiner decide for vector types and large types.
+  const EVT VT = AddNode.getValueType();
+  if (VT.isVector() || VT.getScalarSizeInBits() > 64)
+    return true;
+
+  // It is worse if c1 is legal add immediate, while c1*c2 is not
+  // and has to be composed by at least two instructions.
+  const ConstantSDNode *C1Node = cast<ConstantSDNode>(AddNode.getOperand(1));
+  const ConstantSDNode *C2Node = cast<ConstantSDNode>(ConstNode);
+  const int64_t C1 = C1Node->getSExtValue();
+  const APInt C1C2 = C1Node->getAPIntValue() * C2Node->getAPIntValue();
+  if (!isLegalAddImmediate(C1) || isLegalAddImmediate(C1C2.getSExtValue()))
+    return true;
+  SmallVector<AArch64_IMM::ImmInsnModel, 4> Insn;
+  AArch64_IMM::expandMOVImm(C1C2.getZExtValue(), VT.getSizeInBits(), Insn);
+  if (Insn.size() > 1)
+    return false;
+
+  // Default to true and let the DAGCombiner decide.
+  return true;
+}
+
 // Integer comparisons are implemented with ADDS/SUBS, so the range of valid
 // immediates is the same as for an add or a sub.
 bool AArch64TargetLowering::isLegalICmpImmediate(int64_t Immed) const {
@@ -13860,6 +13888,8 @@ static bool isEssentiallyExtractHighSubvector(SDValue N) {
   if (N.getOpcode() == ISD::BITCAST)
     N = N.getOperand(0);
   if (N.getOpcode() != ISD::EXTRACT_SUBVECTOR)
+    return false;
+  if (N.getOperand(0).getValueType().isScalableVector())
     return false;
   return cast<ConstantSDNode>(N.getOperand(1))->getAPIntValue() ==
          N.getOperand(0).getValueType().getVectorNumElements() / 2;
