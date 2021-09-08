@@ -103,7 +103,7 @@ void Prescanner::Statement() {
   case LineClassification::Kind::IncludeDirective:
   case LineClassification::Kind::DefinitionDirective:
   case LineClassification::Kind::PreprocessorDirective:
-    preprocessor_.Directive(TokenizePreprocessorDirective(), this);
+    preprocessor_.Directive(TokenizePreprocessorDirective(), *this);
     return;
   case LineClassification::Kind::CompilerDirective:
     directiveSentinel_ = line.sentinel;
@@ -760,14 +760,12 @@ void Prescanner::FortranInclude(const char *firstQuote) {
   std::string buf;
   llvm::raw_string_ostream error{buf};
   Provenance provenance{GetProvenance(nextLine_)};
-  const SourceFile *currentFile{allSources_.GetSourceFile(provenance)};
-  if (currentFile) {
-    allSources_.PushSearchPathDirectory(DirectoryName(currentFile->path()));
+  std::optional<std::string> prependPath;
+  if (const SourceFile * currentFile{allSources_.GetSourceFile(provenance)}) {
+    prependPath = DirectoryName(currentFile->path());
   }
-  const SourceFile *included{allSources_.Open(path, error)};
-  if (currentFile) {
-    allSources_.PopSearchPathDirectory();
-  }
+  const SourceFile *included{
+      allSources_.Open(path, error, std::move(prependPath))};
   if (!included) {
     Say(provenance, "INCLUDE: %s"_err_en_US, error.str());
   } else if (included->bytes() > 0) {
@@ -825,7 +823,7 @@ bool Prescanner::SkipCommentLine(bool afterAmpersand) {
     // (when it does not follow '&'), #define, and #undef (because
     // they cannot be allowed to affect preceding text on a
     // continued line).
-    preprocessor_.Directive(TokenizePreprocessorDirective(), this);
+    preprocessor_.Directive(TokenizePreprocessorDirective(), *this);
     return true;
   } else if (afterAmpersand &&
       (lineClass.kind == LineClassification::Kind::IncludeDirective ||

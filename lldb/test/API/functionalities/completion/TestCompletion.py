@@ -164,6 +164,8 @@ class CommandLineCompletionTestCase(TestBase):
 
         self.complete_from_to('process signal ',
                               'process signal SIG')
+        self.complete_from_to('process signal SIGPIP',
+                              'process signal SIGPIPE')
         self.complete_from_to('process signal SIGA',
                               ['SIGABRT',
                                'SIGALRM'])
@@ -291,6 +293,7 @@ class CommandLineCompletionTestCase(TestBase):
         """Test that 'help watchpoint s' completes to 'help watchpoint set '."""
         self.complete_from_to('help watchpoint s', 'help watchpoint set ')
 
+    @expectedFailureNetBSD
     def test_common_complete_watchpoint_ids(self):
         subcommands = ['enable', 'disable', 'delete', 'modify', 'ignore']
 

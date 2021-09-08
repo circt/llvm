@@ -970,6 +970,22 @@ define i1 @test52(i32 %x1) {
   ret i1 %A
 }
 
+define i1 @test52_logical(i32 %x1) {
+; CHECK-LABEL: @test52_logical(
+; CHECK-NEXT:    [[TMP1:%.*]] = and i32 [[X1:%.*]], 16711935
+; CHECK-NEXT:    [[TMP2:%.*]] = icmp eq i32 [[TMP1]], 4980863
+; CHECK-NEXT:    ret i1 [[TMP2]]
+;
+  %conv = and i32 %x1, 255
+  %cmp = icmp eq i32 %conv, 127
+  %i2 = lshr i32 %x1, 16
+  %i3 = trunc i32 %i2 to i8
+  %cmp15 = icmp eq i8 %i3, 76
+
+  %A = select i1 %cmp, i1 %cmp15, i1 false
+  ret i1 %A
+}
+
 define i1 @test52b(i128 %x1) {
 ; CHECK-LABEL: @test52b(
 ; CHECK-NEXT:    [[TMP1:%.*]] = and i128 [[X1:%.*]], 16711935
@@ -983,6 +999,22 @@ define i1 @test52b(i128 %x1) {
   %cmp15 = icmp eq i8 %i3, 76
 
   %A = and i1 %cmp, %cmp15
+  ret i1 %A
+}
+
+define i1 @test52b_logical(i128 %x1) {
+; CHECK-LABEL: @test52b_logical(
+; CHECK-NEXT:    [[TMP1:%.*]] = and i128 [[X1:%.*]], 16711935
+; CHECK-NEXT:    [[TMP2:%.*]] = icmp eq i128 [[TMP1]], 4980863
+; CHECK-NEXT:    ret i1 [[TMP2]]
+;
+  %conv = and i128 %x1, 255
+  %cmp = icmp eq i128 %conv, 127
+  %i2 = lshr i128 %x1, 16
+  %i3 = trunc i128 %i2 to i8
+  %cmp15 = icmp eq i8 %i3, 76
+
+  %A = select i1 %cmp, i1 %cmp15, i1 false
   ret i1 %A
 }
 
@@ -1841,6 +1873,24 @@ define i1 @icmp_and_shr_multiuse(i32 %X) {
   ret i1 %and3
 }
 
+define i1 @icmp_and_shr_multiuse_logical(i32 %X) {
+; CHECK-LABEL: @icmp_and_shr_multiuse_logical(
+; CHECK-NEXT:    [[TMP1:%.*]] = and i32 [[X:%.*]], 240
+; CHECK-NEXT:    [[TOBOOL:%.*]] = icmp ne i32 [[TMP1]], 224
+; CHECK-NEXT:    [[TMP2:%.*]] = and i32 [[X]], 496
+; CHECK-NEXT:    [[TOBOOL2:%.*]] = icmp ne i32 [[TMP2]], 432
+; CHECK-NEXT:    [[AND3:%.*]] = and i1 [[TOBOOL]], [[TOBOOL2]]
+; CHECK-NEXT:    ret i1 [[AND3]]
+;
+  %shr = lshr i32 %X, 4
+  %and = and i32 %shr, 15
+  %and2 = and i32 %shr, 31 ; second use of the shift
+  %tobool = icmp ne i32 %and, 14
+  %tobool2 = icmp ne i32 %and2, 27
+  %and3 = select i1 %tobool, i1 %tobool2, i1 false
+  ret i1 %and3
+}
+
 ; Variation of the above with an ashr
 define i1 @icmp_and_ashr_multiuse(i32 %X) {
 ; CHECK-LABEL: @icmp_and_ashr_multiuse(
@@ -1857,6 +1907,24 @@ define i1 @icmp_and_ashr_multiuse(i32 %X) {
   %tobool = icmp ne i32 %and, 14
   %tobool2 = icmp ne i32 %and2, 27
   %and3 = and i1 %tobool, %tobool2
+  ret i1 %and3
+}
+
+define i1 @icmp_and_ashr_multiuse_logical(i32 %X) {
+; CHECK-LABEL: @icmp_and_ashr_multiuse_logical(
+; CHECK-NEXT:    [[TMP1:%.*]] = and i32 [[X:%.*]], 240
+; CHECK-NEXT:    [[TOBOOL:%.*]] = icmp ne i32 [[TMP1]], 224
+; CHECK-NEXT:    [[TMP2:%.*]] = and i32 [[X]], 496
+; CHECK-NEXT:    [[TOBOOL2:%.*]] = icmp ne i32 [[TMP2]], 432
+; CHECK-NEXT:    [[AND3:%.*]] = and i1 [[TOBOOL]], [[TOBOOL2]]
+; CHECK-NEXT:    ret i1 [[AND3]]
+;
+  %shr = ashr i32 %X, 4
+  %and = and i32 %shr, 15
+  %and2 = and i32 %shr, 31 ; second use of the shift
+  %tobool = icmp ne i32 %and, 14
+  %tobool2 = icmp ne i32 %and2, 27
+  %and3 = select i1 %tobool, i1 %tobool2, i1 false
   ret i1 %and3
 }
 
@@ -2162,6 +2230,19 @@ define i1 @or_icmp_eq_B_0_icmp_ult_A_B(i64 %a, i64 %b) {
   ret i1 %3
 }
 
+define i1 @or_icmp_eq_B_0_icmp_ult_A_B_logical(i64 %a, i64 %b) {
+; CHECK-LABEL: @or_icmp_eq_B_0_icmp_ult_A_B_logical(
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp eq i64 [[B:%.*]], 0
+; CHECK-NEXT:    [[TMP2:%.*]] = icmp ult i64 [[A:%.*]], [[B]]
+; CHECK-NEXT:    [[TMP3:%.*]] = select i1 [[TMP1]], i1 true, i1 [[TMP2]]
+; CHECK-NEXT:    ret i1 [[TMP3]]
+;
+  %1 = icmp eq i64 %b, 0
+  %2 = icmp ult i64 %a, %b
+  %3 = select i1 %1, i1 true, i1 %2
+  ret i1 %3
+}
+
 define <2 x i1> @or_icmp_eq_B_0_icmp_ult_A_B_uniform(<2 x i64> %a, <2 x i64> %b) {
 ; CHECK-LABEL: @or_icmp_eq_B_0_icmp_ult_A_B_uniform(
 ; CHECK-NEXT:    [[TMP1:%.*]] = add <2 x i64> [[B:%.*]], <i64 -1, i64 -1>
@@ -2195,6 +2276,19 @@ define i1 @or_icmp_ne_A_0_icmp_ne_B_0(i64 %a, i64 %b) {
   %1 = icmp ne i64 %a, 0
   %2 = icmp ne i64 %b, 0
   %3 = or i1 %1, %2
+  ret i1 %3
+}
+
+define i1 @or_icmp_ne_A_0_icmp_ne_B_0_logical(i64 %a, i64 %b) {
+; CHECK-LABEL: @or_icmp_ne_A_0_icmp_ne_B_0_logical(
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp ne i64 [[A:%.*]], 0
+; CHECK-NEXT:    [[TMP2:%.*]] = icmp ne i64 [[B:%.*]], 0
+; CHECK-NEXT:    [[TMP3:%.*]] = select i1 [[TMP1]], i1 true, i1 [[TMP2]]
+; CHECK-NEXT:    ret i1 [[TMP3]]
+;
+  %1 = icmp ne i64 %a, 0
+  %2 = icmp ne i64 %b, 0
+  %3 = select i1 %1, i1 true, i1 %2
   ret i1 %3
 }
 
@@ -2961,7 +3055,7 @@ define i1 @icmp_sle_zero_add_nsw(i32 %a) {
 
 define zeroext i1 @icmp_cmpxchg_strong(i32* %sc, i32 %old_val, i32 %new_val) {
 ; CHECK-LABEL: @icmp_cmpxchg_strong(
-; CHECK-NEXT:    [[XCHG:%.*]] = cmpxchg i32* [[SC:%.*]], i32 [[OLD_VAL:%.*]], i32 [[NEW_VAL:%.*]] seq_cst seq_cst
+; CHECK-NEXT:    [[XCHG:%.*]] = cmpxchg i32* [[SC:%.*]], i32 [[OLD_VAL:%.*]], i32 [[NEW_VAL:%.*]] seq_cst seq_cst, align 4
 ; CHECK-NEXT:    [[ICMP:%.*]] = extractvalue { i32, i1 } [[XCHG]], 1
 ; CHECK-NEXT:    ret i1 [[ICMP]]
 ;
@@ -3056,10 +3150,8 @@ define i32 @f5(i8 %a, i8 %b) {
 ; CHECK-NEXT:    [[CONV:%.*]] = zext i8 [[A:%.*]] to i32
 ; CHECK-NEXT:    [[CONV3:%.*]] = zext i8 [[B:%.*]] to i32
 ; CHECK-NEXT:    [[SUB:%.*]] = sub nsw i32 [[CONV]], [[CONV3]]
-; CHECK-NEXT:    [[CMP4:%.*]] = icmp slt i32 [[SUB]], 0
-; CHECK-NEXT:    [[SUB7:%.*]] = sub nsw i32 0, [[SUB]]
-; CHECK-NEXT:    [[SUB7_SUB:%.*]] = select i1 [[CMP4]], i32 [[SUB7]], i32 [[SUB]]
-; CHECK-NEXT:    ret i32 [[SUB7_SUB]]
+; CHECK-NEXT:    [[TMP1:%.*]] = call i32 @llvm.abs.i32(i32 [[SUB]], i1 true)
+; CHECK-NEXT:    ret i32 [[TMP1]]
 ;
   %conv = zext i8 %a to i32
   %conv3 = zext i8 %b to i32
@@ -3653,10 +3745,8 @@ define i1 @knownbits8(i8 %a, i8 %b) {
 define i32 @abs_preserve(i32 %x) {
 ; CHECK-LABEL: @abs_preserve(
 ; CHECK-NEXT:    [[A:%.*]] = shl nsw i32 [[X:%.*]], 1
-; CHECK-NEXT:    [[C:%.*]] = icmp slt i32 [[A]], 0
-; CHECK-NEXT:    [[NEGA:%.*]] = sub i32 0, [[A]]
-; CHECK-NEXT:    [[ABS:%.*]] = select i1 [[C]], i32 [[NEGA]], i32 [[A]]
-; CHECK-NEXT:    ret i32 [[ABS]]
+; CHECK-NEXT:    [[TMP1:%.*]] = call i32 @llvm.abs.i32(i32 [[A]], i1 false)
+; CHECK-NEXT:    ret i32 [[TMP1]]
 ;
   %a = mul nsw i32 %x, 2
   %c = icmp sge i32 %a, 0
@@ -3694,10 +3784,8 @@ define <2 x i1> @PR36583(<2 x i8*>)  {
 ; fold (icmp pred (sub (0, X)) C1) for vec type
 define <2 x i32> @Op1Negated_Vec(<2 x i32> %x) {
 ; CHECK-LABEL: @Op1Negated_Vec(
-; CHECK-NEXT:    [[SUB:%.*]] = sub nsw <2 x i32> zeroinitializer, [[X:%.*]]
-; CHECK-NEXT:    [[CMP:%.*]] = icmp slt <2 x i32> [[X]], zeroinitializer
-; CHECK-NEXT:    [[COND:%.*]] = select <2 x i1> [[CMP]], <2 x i32> [[SUB]], <2 x i32> [[X]]
-; CHECK-NEXT:    ret <2 x i32> [[COND]]
+; CHECK-NEXT:    [[TMP1:%.*]] = call <2 x i32> @llvm.abs.v2i32(<2 x i32> [[X:%.*]], i1 true)
+; CHECK-NEXT:    ret <2 x i32> [[TMP1]]
 ;
   %sub = sub nsw <2 x i32> zeroinitializer, %x
   %cmp = icmp sgt <2 x i32> %sub, <i32 -1, i32 -1>
@@ -3841,4 +3929,71 @@ bb:
   %i2 = sub nsw i32 0, %i1
   %i3 = icmp eq i32 %i, %i2
   ret i1 %i3
+}
+
+; PR50944
+
+define i1 @thread_cmp_over_select_with_poison_trueval(i1 %b) {
+; CHECK-LABEL: @thread_cmp_over_select_with_poison_trueval(
+; CHECK-NEXT:    ret i1 false
+;
+  %s = select i1 %b, i32 poison, i32 0
+  %tobool = icmp ne i32 %s, 0
+  ret i1 %tobool
+}
+
+define i1 @thread_cmp_over_select_with_poison_falseval(i1 %b) {
+; CHECK-LABEL: @thread_cmp_over_select_with_poison_falseval(
+; CHECK-NEXT:    ret i1 true
+;
+  %s = select i1 %b, i32 1, i32 poison
+  %tobool = icmp ne i32 %s, 0
+  ret i1 %tobool
+}
+
+define i1 @signbit_true_logic(i8 %x) {
+; CHECK-LABEL: @signbit_true_logic(
+; CHECK-NEXT:    [[R:%.*]] = icmp eq i8 [[X:%.*]], 0
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %dec = add i8 %x, -1
+  %not = xor i8 %x, -1
+  %and = and i8 %dec, %not
+  %r = icmp slt i8 %and, 0
+  ret i1 %r
+}
+
+define <2 x i1> @signbit_false_logic(<2 x i5> %x) {
+; CHECK-LABEL: @signbit_false_logic(
+; CHECK-NEXT:    [[R:%.*]] = icmp ne <2 x i5> [[X:%.*]], zeroinitializer
+; CHECK-NEXT:    ret <2 x i1> [[R]]
+;
+  %dec = add <2 x i5> %x,  <i5 -1, i5 undef>
+  %not = xor <2 x i5> %x,  <i5 -1, i5 -1>
+  %and = and <2 x i5> %dec, %not
+  %r = icmp sgt <2 x i5> %and, <i5 -1, i5 -1>
+  ret <2 x i1> %r
+}
+
+; Confirm that complexity canonicalization works for commuted pattern.
+
+define i1 @signbit_true_logic_uses_commute(i64 %x) {
+; CHECK-LABEL: @signbit_true_logic_uses_commute(
+; CHECK-NEXT:    [[DEC:%.*]] = add i64 [[X:%.*]], -1
+; CHECK-NEXT:    call void @use_i64(i64 [[DEC]])
+; CHECK-NEXT:    [[NOT:%.*]] = xor i64 [[X]], -1
+; CHECK-NEXT:    call void @use_i64(i64 [[NOT]])
+; CHECK-NEXT:    [[AND:%.*]] = and i64 [[DEC]], [[NOT]]
+; CHECK-NEXT:    call void @use_i64(i64 [[AND]])
+; CHECK-NEXT:    [[R:%.*]] = icmp eq i64 [[X]], 0
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %dec = add i64 %x, -1
+  call void @use_i64(i64 %dec)
+  %not = xor i64 %x, -1
+  call void @use_i64(i64 %not)
+  %and = and i64 %not, %dec
+  call void @use_i64(i64 %and)
+  %r = icmp slt i64 %and, 0
+  ret i1 %r
 }

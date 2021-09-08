@@ -333,7 +333,7 @@ using ScalarDefaultCharExpr = Scalar<DefaultCharExpr>;
 using ScalarDefaultCharConstantExpr = Scalar<DefaultChar<ConstantExpr>>;
 
 // R611 label -> digit [digit]...
-using Label = std::uint64_t; // validated later, must be in [1..99999]
+using Label = common::Label; // validated later, must be in [1..99999]
 
 // A wrapper for xzy-stmt productions that are statements, so that
 // source provenances and labels have a uniform representation.
@@ -426,8 +426,9 @@ struct DeclarationConstruct {
 
 // R504 specification-part -> [use-stmt]... [import-stmt]... [implicit-part]
 //                            [declaration-construct]...
-// TODO: transfer any statements after the last IMPLICIT (if any)
-// from the implicit part to the declaration constructs
+// PARAMETER, FORMAT, and ENTRY statements that appear before any other
+// kind of declaration-construct will be parsed into the implicit-part,
+// even if there are no IMPLICIT statements.
 struct SpecificationPart {
   TUPLE_CLASS_BOILERPLATE(SpecificationPart);
   std::tuple<std::list<OpenACCDeclarativeConstruct>,
@@ -859,13 +860,6 @@ struct LiteralConstant {
       RealLiteralConstant, ComplexLiteralConstant, BOZLiteralConstant,
       CharLiteralConstant, LogicalLiteralConstant>
       u;
-};
-
-// R604 constant ->  literal-constant | named-constant
-// Renamed to dodge a clash with Constant<> template class.
-struct ConstantValue {
-  UNION_CLASS_BOILERPLATE(ConstantValue);
-  std::variant<LiteralConstant, NamedConstant> u;
 };
 
 // R807 access-spec -> PUBLIC | PRIVATE
@@ -1412,14 +1406,15 @@ using TypedExpr = common::ForwardOwningPointer<evaluate::GenericExprWrapper>;
 //        signed-int-literal-constant | signed-real-literal-constant |
 //        null-init | initial-data-target |
 //        structure-constructor
+// N.B. Parsing ambiguities abound here without recourse to symbols
+// (see comments on R845's parser).
 struct DataStmtConstant {
   UNION_CLASS_BOILERPLATE(DataStmtConstant);
   CharBlock source;
   mutable TypedExpr typedExpr;
-  std::variant<Scalar<ConstantValue>, Scalar<ConstantSubobject>,
-      SignedIntLiteralConstant, SignedRealLiteralConstant,
-      SignedComplexLiteralConstant, NullInit, InitialDataTarget,
-      StructureConstructor>
+  std::variant<LiteralConstant, SignedIntLiteralConstant,
+      SignedRealLiteralConstant, SignedComplexLiteralConstant, NullInit,
+      common::Indirection<Designator>, StructureConstructor>
       u;
 };
 
@@ -1784,7 +1779,7 @@ struct Designator {
 struct Variable {
   UNION_CLASS_BOILERPLATE(Variable);
   mutable TypedExpr typedExpr;
-  parser::CharBlock GetSource() const;
+  CharBlock GetSource() const;
   std::variant<common::Indirection<Designator>,
       common::Indirection<FunctionReference>>
       u;
@@ -1841,6 +1836,7 @@ struct ArrayElement {
 // R933 allocate-object -> variable-name | structure-component
 struct AllocateObject {
   UNION_CLASS_BOILERPLATE(AllocateObject);
+  mutable TypedExpr typedExpr;
   std::variant<Name, StructureComponent> u;
 };
 
@@ -1912,6 +1908,7 @@ struct AllocateStmt {
 //        variable-name | structure-component | proc-pointer-name
 struct PointerObject {
   UNION_CLASS_BOILERPLATE(PointerObject);
+  mutable TypedExpr typedExpr;
   std::variant<Name, StructureComponent> u;
 };
 
@@ -2100,11 +2097,11 @@ WRAPPER_CLASS(EndBlockStmt, std::optional<Name>);
 // R1109 block-specification-part ->
 //         [use-stmt]... [import-stmt]...
 //         [[declaration-construct]... specification-construct]
-WRAPPER_CLASS(BlockSpecificationPart, SpecificationPart);
-// TODO: Because BlockSpecificationPart just wraps the more general
+// N.B. Because BlockSpecificationPart just wraps the more general
 // SpecificationPart, it can misrecognize an ImplicitPart as part of
 // the BlockSpecificationPart during parsing, and we have to detect and
 // flag such usage in semantics.
+WRAPPER_CLASS(BlockSpecificationPart, SpecificationPart);
 
 // R1107 block-construct ->
 //         block-stmt [block-specification-part] block end-block-stmt
@@ -2227,8 +2224,9 @@ WRAPPER_CLASS(EndDoStmt, std::optional<Name>);
 
 // R1119 do-construct -> do-stmt block end-do
 // R1120 do-stmt -> nonlabel-do-stmt | label-do-stmt
-// TODO: deprecated: DO loop ending on statement types other than END DO and
-// CONTINUE; multiple "label DO" loops ending on the same label
+// Deprecated, but supported: "label DO" loops ending on statements other
+// than END DO and CONTINUE, and multiple "label DO" loops ending on the
+// same label.
 struct DoConstruct {
   TUPLE_CLASS_BOILERPLATE(DoConstruct);
   const std::optional<LoopControl> &GetLoopControl() const;
@@ -3419,7 +3417,7 @@ struct OmpReductionOperator {
 //                                         variable-name-list)
 struct OmpReductionClause {
   TUPLE_CLASS_BOILERPLATE(OmpReductionClause);
-  std::tuple<OmpReductionOperator, std::list<Designator>> t;
+  std::tuple<OmpReductionOperator, OmpObjectList> t;
 };
 
 // OMP 5.0 2.11.4 allocate-clause -> ALLOCATE ([allocator:] variable-name-list)
@@ -3460,25 +3458,18 @@ struct OmpDependClause {
   std::variant<Source, Sink, InOut> u;
 };
 
-// 2.7.1 nowait-clause -> NOWAIT
-EMPTY_CLASS(OmpNowait);
-
-// dist_schedule clause does not fit in generic clause class for tablegen.
-// Therefore it is declared separatly here.
-WRAPPER_CLASS(OmpDistScheduleClause, std::optional<ScalarIntExpr>);
-
 // OpenMP Clauses
 struct OmpClause {
   UNION_CLASS_BOILERPLATE(OmpClause);
 
 #define GEN_FLANG_CLAUSE_PARSER_CLASSES
-#include "llvm/Frontend/OpenMP/OMP.cpp.inc"
+#include "llvm/Frontend/OpenMP/OMP.inc"
 
   CharBlock source;
 
   std::variant<
 #define GEN_FLANG_CLAUSE_PARSER_CLASSES_LIST
-#include "llvm/Frontend/OpenMP/OMP.cpp.inc"
+#include "llvm/Frontend/OpenMP/OMP.inc"
       >
       u;
 };
@@ -3814,7 +3805,7 @@ struct OpenMPConstruct {
   UNION_CLASS_BOILERPLATE(OpenMPConstruct);
   std::variant<OpenMPStandaloneConstruct, OpenMPSectionsConstruct,
       OpenMPLoopConstruct, OpenMPBlockConstruct, OpenMPAtomicConstruct,
-      OpenMPExecutableAllocate, OpenMPDeclarativeAllocate,
+      OpenMPDeclarativeAllocate, OpenMPExecutableAllocate,
       OpenMPCriticalConstruct>
       u;
 };
@@ -3856,9 +3847,14 @@ struct AccDeclarativeDirective {
 };
 
 // OpenACC Clauses
+struct AccBindClause {
+  UNION_CLASS_BOILERPLATE(AccBindClause);
+  std::variant<Name, ScalarDefaultCharExpr> u;
+  CharBlock source;
+};
+
 struct AccDefaultClause {
-  ENUM_CLASS(Arg, None, Present)
-  WRAPPER_CLASS_BOILERPLATE(AccDefaultClause, Arg);
+  WRAPPER_CLASS_BOILERPLATE(AccDefaultClause, llvm::acc::DefaultValue);
   CharBlock source;
 };
 
@@ -3926,13 +3922,13 @@ struct AccClause {
   UNION_CLASS_BOILERPLATE(AccClause);
 
 #define GEN_FLANG_CLAUSE_PARSER_CLASSES
-#include "llvm/Frontend/OpenACC/ACC.cpp.inc"
+#include "llvm/Frontend/OpenACC/ACC.inc"
 
   CharBlock source;
 
   std::variant<
 #define GEN_FLANG_CLAUSE_PARSER_CLASSES_LIST
-#include "llvm/Frontend/OpenACC/ACC.cpp.inc"
+#include "llvm/Frontend/OpenACC/ACC.inc"
       >
       u;
 };
@@ -4052,7 +4048,8 @@ struct OpenACCCombinedConstruct {
 struct OpenACCDeclarativeConstruct {
   UNION_CLASS_BOILERPLATE(OpenACCDeclarativeConstruct);
   CharBlock source;
-  std::variant<OpenACCStandaloneDeclarativeConstruct> u;
+  std::variant<OpenACCStandaloneDeclarativeConstruct, OpenACCRoutineConstruct>
+      u;
 };
 
 // OpenACC directives enclosing do loop
@@ -4072,8 +4069,8 @@ struct OpenACCStandaloneConstruct {
 struct OpenACCConstruct {
   UNION_CLASS_BOILERPLATE(OpenACCConstruct);
   std::variant<OpenACCBlockConstruct, OpenACCCombinedConstruct,
-      OpenACCLoopConstruct, OpenACCStandaloneConstruct, OpenACCRoutineConstruct,
-      OpenACCCacheConstruct, OpenACCWaitConstruct, OpenACCAtomicConstruct>
+      OpenACCLoopConstruct, OpenACCStandaloneConstruct, OpenACCCacheConstruct,
+      OpenACCWaitConstruct, OpenACCAtomicConstruct>
       u;
 };
 

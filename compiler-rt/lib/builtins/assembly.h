@@ -14,8 +14,8 @@
 #ifndef COMPILERRT_ASSEMBLY_H
 #define COMPILERRT_ASSEMBLY_H
 
-#if defined(__POWERPC__) || defined(__powerpc__) || defined(__ppc__)
-#define SEPARATOR @
+#if defined(__APPLE__) && defined(__aarch64__)
+#define SEPARATOR %%
 #else
 #define SEPARATOR ;
 #endif
@@ -105,9 +105,11 @@
   .popsection
 
 #if BTI_FLAG != 0
-#define BTI_C bti c
+#define BTI_C hint #34
+#define BTI_J hint #36
 #else
 #define BTI_C
+#define BTI_J
 #endif
 
 #if (BTI_FLAG | PAC_FLAG) != 0
@@ -204,8 +206,11 @@
 #ifdef VISIBILITY_HIDDEN
 #define DECLARE_SYMBOL_VISIBILITY(name)                                        \
   HIDDEN(SYMBOL_NAME(name)) SEPARATOR
+#define DECLARE_SYMBOL_VISIBILITY_UNMANGLED(name) \
+  HIDDEN(name) SEPARATOR
 #else
 #define DECLARE_SYMBOL_VISIBILITY(name)
+#define DECLARE_SYMBOL_VISIBILITY_UNMANGLED(name)
 #endif
 
 #define DEFINE_COMPILERRT_FUNCTION(name)                                       \
@@ -243,16 +248,12 @@
   DECLARE_FUNC_ENCODING                                                        \
   name:
 
-// TODO(ilinpv) START & END parts will be merged when assembly parser bug
-// (kristina) in MasmParser::parseDirectiveCFIStartProc() is fixed.
-#define DEFINE_COMPILERRT_OUTLINE_FUNCTION_UNMANGLED_START(name)               \
+#define DEFINE_COMPILERRT_OUTLINE_FUNCTION_UNMANGLED(name)                     \
   DEFINE_CODE_STATE                                                            \
   FUNC_ALIGN                                                                   \
   .globl name SEPARATOR                                                        \
   SYMBOL_IS_FUNC(name) SEPARATOR                                               \
-  DECLARE_SYMBOL_VISIBILITY(name)
-
-#define DEFINE_COMPILERRT_OUTLINE_FUNCTION_UNMANGLED_END(name)                 \
+  DECLARE_SYMBOL_VISIBILITY_UNMANGLED(name) SEPARATOR                          \
   CFI_START SEPARATOR                                                          \
   DECLARE_FUNC_ENCODING                                                        \
   name: SEPARATOR BTI_C

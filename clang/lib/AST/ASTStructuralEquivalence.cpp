@@ -86,6 +86,7 @@
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -231,6 +232,24 @@ class StmtComparer {
 
   bool IsStmtEquivalent(const FloatingLiteral *E1, const FloatingLiteral *E2) {
     return E1->isExact() == E2->isExact() && E1->getValue() == E2->getValue();
+  }
+
+  bool IsStmtEquivalent(const GenericSelectionExpr *E1,
+                        const GenericSelectionExpr *E2) {
+    for (auto Pair : zip_longest(E1->getAssocTypeSourceInfos(),
+                                 E2->getAssocTypeSourceInfos())) {
+      Optional<TypeSourceInfo *> Child1 = std::get<0>(Pair);
+      Optional<TypeSourceInfo *> Child2 = std::get<1>(Pair);
+      // Skip this case if there are a different number of associated types.
+      if (!Child1 || !Child2)
+        return false;
+
+      if (!IsStructurallyEquivalent(Context, (*Child1)->getType(),
+                                    (*Child2)->getType()))
+        return false;
+    }
+
+    return true;
   }
 
   bool IsStmtEquivalent(const ImplicitCastExpr *CastE1,
@@ -1605,7 +1624,7 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
                           diag::err_odr_tag_type_inconsistent))
             << Context.ToCtx.getTypeDeclType(D2);
         Context.Diag1(EC1->getLocation(), diag::note_odr_enumerator)
-            << EC1->getDeclName() << EC1->getInitVal().toString(10);
+            << EC1->getDeclName() << toString(EC1->getInitVal(), 10);
         Context.Diag2(D2->getLocation(), diag::note_odr_missing_enumerator);
       }
       return false;
@@ -1621,9 +1640,9 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
                           diag::err_odr_tag_type_inconsistent))
             << Context.ToCtx.getTypeDeclType(D2);
         Context.Diag2(EC2->getLocation(), diag::note_odr_enumerator)
-            << EC2->getDeclName() << EC2->getInitVal().toString(10);
+            << EC2->getDeclName() << toString(EC2->getInitVal(), 10);
         Context.Diag1(EC1->getLocation(), diag::note_odr_enumerator)
-            << EC1->getDeclName() << EC1->getInitVal().toString(10);
+            << EC1->getDeclName() << toString(EC1->getInitVal(), 10);
       }
       return false;
     }
@@ -1635,7 +1654,7 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
                                            diag::err_odr_tag_type_inconsistent))
           << Context.ToCtx.getTypeDeclType(D2);
       Context.Diag2(EC2->getLocation(), diag::note_odr_enumerator)
-          << EC2->getDeclName() << EC2->getInitVal().toString(10);
+          << EC2->getDeclName() << toString(EC2->getInitVal(), 10);
       Context.Diag1(D1->getLocation(), diag::note_odr_missing_enumerator);
     }
     return false;

@@ -5,7 +5,7 @@
 ; RUN:     -enable-unsafe-fp-math -mattr=-vsx < %s | FileCheck -check-prefix=CHECK-FAST-NOVSX %s
 ; RUN: llc -mtriple=powerpc64le-unknown-linux-gnu < %s | FileCheck %s
 
-define double @fma_combine1(double %a, double %b, double %c) {
+define dso_local double @fma_combine1(double %a, double %b, double %c) {
 ; CHECK-FAST-LABEL: fma_combine1:
 ; CHECK-FAST:       # %bb.0: # %entry
 ; CHECK-FAST-NEXT:    xsnmaddadp 1, 3, 2
@@ -29,7 +29,7 @@ entry:
   ret double %add
 }
 
-define double @fma_combine2(double %a, double %b, double %c) {
+define dso_local double @fma_combine2(double %a, double %b, double %c) {
 ; CHECK-FAST-LABEL: fma_combine2:
 ; CHECK-FAST:       # %bb.0: # %entry
 ; CHECK-FAST-NEXT:    xsnmaddadp 1, 2, 3
@@ -53,9 +53,9 @@ entry:
   ret double %add
 }
 
-@v = common local_unnamed_addr global double 0.000000e+00, align 8
-@z = common local_unnamed_addr global double 0.000000e+00, align 8
-define double @fma_combine_two_uses(double %a, double %b, double %c) {
+@v = common dso_local local_unnamed_addr global double 0.000000e+00, align 8
+@z = common dso_local local_unnamed_addr global double 0.000000e+00, align 8
+define dso_local double @fma_combine_two_uses(double %a, double %b, double %c) {
 ; CHECK-FAST-LABEL: fma_combine_two_uses:
 ; CHECK-FAST:       # %bb.0: # %entry
 ; CHECK-FAST-NEXT:    xsnegdp 0, 1
@@ -101,7 +101,7 @@ entry:
   ret double %add
 }
 
-define double @fma_combine_one_use(double %a, double %b, double %c) {
+define dso_local double @fma_combine_one_use(double %a, double %b, double %c) {
 ; CHECK-FAST-LABEL: fma_combine_one_use:
 ; CHECK-FAST:       # %bb.0: # %entry
 ; CHECK-FAST-NEXT:    xsnegdp 0, 1
@@ -138,15 +138,15 @@ entry:
   ret double %add
 }
 
-define float @fma_combine_no_ice() {
+define dso_local float @fma_combine_no_ice() {
 ; CHECK-FAST-LABEL: fma_combine_no_ice:
 ; CHECK-FAST:       # %bb.0:
 ; CHECK-FAST-NEXT:    addis 3, 2, .LCPI4_0@toc@ha
-; CHECK-FAST-NEXT:    addis 4, 2, .LCPI4_1@toc@ha
 ; CHECK-FAST-NEXT:    lfs 0, .LCPI4_0@toc@l(3)
-; CHECK-FAST-NEXT:    lfsx 2, 0, 3
+; CHECK-FAST-NEXT:    addis 3, 2, .LCPI4_1@toc@ha
+; CHECK-FAST-NEXT:    lfs 2, 0(3)
+; CHECK-FAST-NEXT:    lfs 3, .LCPI4_1@toc@l(3)
 ; CHECK-FAST-NEXT:    addis 3, 2, .LCPI4_2@toc@ha
-; CHECK-FAST-NEXT:    lfs 3, .LCPI4_1@toc@l(4)
 ; CHECK-FAST-NEXT:    lfs 1, .LCPI4_2@toc@l(3)
 ; CHECK-FAST-NEXT:    xsmaddasp 3, 2, 0
 ; CHECK-FAST-NEXT:    xsmaddasp 1, 2, 3
@@ -170,11 +170,11 @@ define float @fma_combine_no_ice() {
 ; CHECK-LABEL: fma_combine_no_ice:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    addis 3, 2, .LCPI4_0@toc@ha
-; CHECK-NEXT:    addis 4, 2, .LCPI4_1@toc@ha
 ; CHECK-NEXT:    lfs 0, .LCPI4_0@toc@l(3)
-; CHECK-NEXT:    lfsx 2, 0, 3
+; CHECK-NEXT:    addis 3, 2, .LCPI4_1@toc@ha
+; CHECK-NEXT:    lfs 2, 0(3)
+; CHECK-NEXT:    lfs 3, .LCPI4_1@toc@l(3)
 ; CHECK-NEXT:    addis 3, 2, .LCPI4_2@toc@ha
-; CHECK-NEXT:    lfs 3, .LCPI4_1@toc@l(4)
 ; CHECK-NEXT:    lfs 1, .LCPI4_2@toc@l(3)
 ; CHECK-NEXT:    fmr 4, 3
 ; CHECK-NEXT:    xsmaddasp 3, 2, 0
@@ -184,27 +184,27 @@ define float @fma_combine_no_ice() {
 ; CHECK-NEXT:    blr
   %tmp = load float, float* undef, align 4
   %tmp2 = load float, float* undef, align 4
-  %tmp3 = fmul reassoc float %tmp, 0x3FE372D780000000
-  %tmp4 = fadd reassoc float %tmp3, 1.000000e+00
-  %tmp5 = fmul reassoc float %tmp2, %tmp4
+  %tmp3 = fmul contract reassoc float %tmp, 0x3FE372D780000000
+  %tmp4 = fadd contract reassoc float %tmp3, 1.000000e+00
+  %tmp5 = fmul contract reassoc float %tmp2, %tmp4
   %tmp6 = load float, float* undef, align 4
   %tmp7 = load float, float* undef, align 4
-  %tmp8 = fmul reassoc float %tmp7, 0x3FE372D780000000
-  %tmp9 = fsub reassoc nsz float -1.000000e+00, %tmp8
-  %tmp10 = fmul reassoc float %tmp9, %tmp6
-  %tmp11 = fadd reassoc float %tmp5, 5.000000e-01
-  %tmp12 = fadd reassoc float %tmp11, %tmp10
+  %tmp8 = fmul contract reassoc float %tmp7, 0x3FE372D780000000
+  %tmp9 = fsub contract reassoc nsz float -1.000000e+00, %tmp8
+  %tmp10 = fmul contract reassoc float %tmp9, %tmp6
+  %tmp11 = fadd contract reassoc float %tmp5, 5.000000e-01
+  %tmp12 = fadd contract reassoc float %tmp11, %tmp10
   ret float %tmp12
 }
 
 ; This would crash while trying getNegatedExpression().
-define double @getNegatedExpression_crash(double %x, double %y) {
+define dso_local double @getNegatedExpression_crash(double %x, double %y) {
 ; CHECK-FAST-LABEL: getNegatedExpression_crash:
 ; CHECK-FAST:       # %bb.0:
 ; CHECK-FAST-NEXT:    addis 3, 2, .LCPI5_1@toc@ha
-; CHECK-FAST-NEXT:    addis 4, 2, .LCPI5_0@toc@ha
 ; CHECK-FAST-NEXT:    lfs 3, .LCPI5_1@toc@l(3)
-; CHECK-FAST-NEXT:    lfs 4, .LCPI5_0@toc@l(4)
+; CHECK-FAST-NEXT:    addis 3, 2, .LCPI5_0@toc@ha
+; CHECK-FAST-NEXT:    lfs 4, .LCPI5_0@toc@l(3)
 ; CHECK-FAST-NEXT:    xssubdp 0, 1, 3
 ; CHECK-FAST-NEXT:    xsmaddadp 3, 1, 4
 ; CHECK-FAST-NEXT:    xsmaddadp 0, 3, 2
@@ -225,9 +225,9 @@ define double @getNegatedExpression_crash(double %x, double %y) {
 ; CHECK-LABEL: getNegatedExpression_crash:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    addis 3, 2, .LCPI5_1@toc@ha
-; CHECK-NEXT:    addis 4, 2, .LCPI5_0@toc@ha
 ; CHECK-NEXT:    lfs 3, .LCPI5_1@toc@l(3)
-; CHECK-NEXT:    lfs 4, .LCPI5_0@toc@l(4)
+; CHECK-NEXT:    addis 3, 2, .LCPI5_0@toc@ha
+; CHECK-NEXT:    lfs 4, .LCPI5_0@toc@l(3)
 ; CHECK-NEXT:    xssubdp 0, 1, 3
 ; CHECK-NEXT:    xsmaddadp 3, 1, 4
 ; CHECK-NEXT:    xsmaddadp 0, 3, 2
@@ -240,7 +240,7 @@ define double @getNegatedExpression_crash(double %x, double %y) {
   ret double %fma1
 }
 
-define double @fma_flag_propagation(double %a) {
+define dso_local double @fma_flag_propagation(double %a) {
 ; CHECK-FAST-LABEL: fma_flag_propagation:
 ; CHECK-FAST:       # %bb.0: # %entry
 ; CHECK-FAST-NEXT:    xxlxor 1, 1, 1
@@ -262,7 +262,7 @@ entry:
   ret double %1
 }
 
-define double @neg_fma_flag_propagation(double %a) {
+define dso_local double @neg_fma_flag_propagation(double %a) {
 ; CHECK-FAST-LABEL: neg_fma_flag_propagation:
 ; CHECK-FAST:       # %bb.0: # %entry
 ; CHECK-FAST-NEXT:    xxlxor 1, 1, 1
@@ -313,7 +313,7 @@ entry:
   ret <2 x double> %0
 }
 
-define double @fma_combine_const(double %a, double %b) {
+define dso_local double @fma_combine_const(double %a, double %b) {
 ; CHECK-FAST-LABEL: fma_combine_const:
 ; CHECK-FAST:       # %bb.0: # %entry
 ; CHECK-FAST-NEXT:    addis 3, 2, .LCPI9_0@toc@ha

@@ -7,10 +7,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "flang/Frontend/CompilerInstance.h"
+#include "flang/Common/Fortran-features.h"
 #include "flang/Frontend/CompilerInvocation.h"
 #include "flang/Frontend/TextDiagnosticPrinter.h"
 #include "flang/Parser/parsing.h"
 #include "flang/Parser/provenance.h"
+#include "flang/Semantics/semantics.h"
 #include "llvm/Support/Errc.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
@@ -24,7 +26,6 @@ CompilerInstance::CompilerInstance()
       allSources_(new Fortran::parser::AllSources()),
       allCookedSources_(new Fortran::parser::AllCookedSources(*allSources_)),
       parsing_(new Fortran::parser::Parsing(*allCookedSources_)) {
-
   // TODO: This is a good default during development, but ultimately we should
   // give the user the opportunity to specify this.
   allSources_->set_encoding(Fortran::parser::Encoding::UTF_8);
@@ -39,8 +40,15 @@ void CompilerInstance::set_invocation(
   invocation_ = std::move(value);
 }
 
-void CompilerInstance::AddOutputFile(OutputFile &&outFile) {
-  outputFiles_.push_back(std::move(outFile));
+void CompilerInstance::set_semaOutputStream(raw_ostream &Value) {
+  ownedSemaOutputStream_.release();
+  semaOutputStream_ = &Value;
+}
+
+void CompilerInstance::set_semaOutputStream(
+    std::unique_ptr<raw_ostream> Value) {
+  ownedSemaOutputStream_.swap(Value);
+  semaOutputStream_ = ownedSemaOutputStream_.get();
 }
 
 // Helper method to generate the path of the output file. The following logic
@@ -72,48 +80,52 @@ static std::string GetOutputFilePath(llvm::StringRef outputFilename,
 std::unique_ptr<llvm::raw_pwrite_stream>
 CompilerInstance::CreateDefaultOutputFile(
     bool binary, llvm::StringRef baseName, llvm::StringRef extension) {
-  std::string outputPathName;
-  std::error_code ec;
 
   // Get the path of the output file
   std::string outputFilePath =
-      GetOutputFilePath(frontendOpts().outputFile_, baseName, extension);
+      GetOutputFilePath(frontendOpts().outputFile, baseName, extension);
 
   // Create the output file
-  std::unique_ptr<llvm::raw_pwrite_stream> os =
-      CreateOutputFile(outputFilePath, ec, binary);
+  llvm::Expected<std::unique_ptr<llvm::raw_pwrite_stream>> os =
+      CreateOutputFileImpl(outputFilePath, binary);
 
-  // Add the file to the list of tracked output files (provided it was created
-  // successfully)
-  if (os)
-    AddOutputFile(OutputFile(outputPathName));
+  // If successful, add the file to the list of tracked output files and
+  // return.
+  if (os) {
+    outputFiles_.emplace_back(OutputFile(outputFilePath));
+    return std::move(*os);
+  }
 
-  return os;
+  // If unsuccessful, issue an error and return Null
+  unsigned DiagID = diagnostics().getCustomDiagID(
+      clang::DiagnosticsEngine::Error, "unable to open output file '%0': '%1'");
+  diagnostics().Report(DiagID)
+      << outputFilePath << llvm::errorToErrorCode(os.takeError()).message();
+  return nullptr;
 }
 
-std::unique_ptr<llvm::raw_pwrite_stream> CompilerInstance::CreateOutputFile(
-    llvm::StringRef outputFilePath, std::error_code &error, bool binary) {
+llvm::Expected<std::unique_ptr<llvm::raw_pwrite_stream>>
+CompilerInstance::CreateOutputFileImpl(
+    llvm::StringRef outputFilePath, bool binary) {
 
   // Creates the file descriptor for the output file
   std::unique_ptr<llvm::raw_fd_ostream> os;
-  std::string osFile;
-  if (!os) {
-    osFile = outputFilePath;
-    os.reset(new llvm::raw_fd_ostream(osFile, error,
-        (binary ? llvm::sys::fs::OF_None : llvm::sys::fs::OF_Text)));
-    if (error)
-      return nullptr;
+
+  std::error_code error;
+  os.reset(new llvm::raw_fd_ostream(outputFilePath, error,
+      (binary ? llvm::sys::fs::OF_None : llvm::sys::fs::OF_TextWithCRLF)));
+  if (error) {
+    return llvm::errorCodeToError(error);
   }
 
-  // Return the stream corresponding to the output file.
-  // For non-seekable streams, wrap it in llvm::buffer_ostream first.
+  // For seekable streams, just return the stream corresponding to the output
+  // file.
   if (!binary || os->supportsSeeking())
     return std::move(os);
 
-  assert(!nonSeekStream_ && "The non-seek stream has already been set!");
-  auto b = std::make_unique<llvm::buffer_ostream>(*os);
-  nonSeekStream_ = std::move(os);
-  return std::move(b);
+  // For non-seekable streams, we need to wrap the output stream into something
+  // that supports 'pwrite' and takes care of the ownership for us.
+  return std::make_unique<llvm::buffer_unique_ostream>(std::move(os));
 }
 
 void CompilerInstance::ClearOutputFiles(bool eraseFiles) {
@@ -122,17 +134,22 @@ void CompilerInstance::ClearOutputFiles(bool eraseFiles) {
       llvm::sys::fs::remove(of.filename_);
 
   outputFiles_.clear();
-  nonSeekStream_.reset();
 }
 
 bool CompilerInstance::ExecuteAction(FrontendAction &act) {
-  // Set some sane defaults for the frontend.
-  // TODO: Instead of defaults we should be setting these options based on the
-  // user input.
-  this->invocation().SetDefaultFortranOpts();
+  auto &invoc = this->invocation();
 
-  // Connect Input to a CompileInstance
-  for (const FrontendInputFile &fif : frontendOpts().inputs_) {
+  // Set some sane defaults for the frontend.
+  invoc.SetDefaultFortranOpts();
+  // Update the fortran options based on user-based input.
+  invoc.setFortranOpts();
+  // Set the encoding to read all input files in based on user input.
+  allSources_->set_encoding(invoc.fortranOpts().encoding);
+  // Create the semantics context and set semantic options.
+  invoc.setSemanticsOpts(*this->allCookedSources_);
+
+  // Run the frontend action `act` for every input file.
+  for (const FrontendInputFile &fif : frontendOpts().inputs) {
     if (act.BeginSourceFile(*this, fif)) {
       if (llvm::Error err = act.Execute()) {
         consumeError(std::move(err));
@@ -140,7 +157,7 @@ bool CompilerInstance::ExecuteAction(FrontendAction &act) {
       act.EndSourceFile();
     }
   }
-  return true;
+  return !diagnostics().getClient()->getNumErrors();
 }
 
 void CompilerInstance::CreateDiagnostics(

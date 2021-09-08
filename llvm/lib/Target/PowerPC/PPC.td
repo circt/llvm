@@ -57,6 +57,10 @@ def DirectivePwrFuture
 
 def Feature64Bit     : SubtargetFeature<"64bit","Has64BitSupport", "true",
                                         "Enable 64-bit instructions">;
+def AIXOS: SubtargetFeature<"aix", "IsAIX", "true", "AIX OS">;
+def FeatureModernAIXAs
+    : SubtargetFeature<"modern-aix-as", "HasModernAIXAs", "true",
+                       "AIX system assembler is modern enough to support new mnes">;
 def FeatureHardFloat : SubtargetFeature<"hard-float", "HasHardFloat", "true",
                               "Enable floating-point instructions">;
 def Feature64BitRegs : SubtargetFeature<"64bitregs","Use64BitRegs", "true",
@@ -72,6 +76,9 @@ def FeatureAltivec   : SubtargetFeature<"altivec","HasAltivec", "true",
 def FeatureSPE       : SubtargetFeature<"spe","HasSPE", "true",
                                         "Enable SPE instructions",
                                         [FeatureHardFloat]>;
+def FeatureEFPU2 : SubtargetFeature<"efpu2", "HasEFPU2", "true", 
+                                        "Enable Embedded Floating-Point APU 2 instructions",
+                                        [FeatureSPE]>;
 def FeatureMFOCRF    : SubtargetFeature<"mfocrf","HasMFOCRF", "true",
                                         "Enable the MFOCRF instruction">;
 def FeatureFSqrt     : SubtargetFeature<"fsqrt","HasFSQRT", "true",
@@ -154,6 +161,9 @@ def FeatureDirectMove :
 def FeaturePartwordAtomic : SubtargetFeature<"partword-atomics",
                                              "HasPartwordAtomics", "true",
                                              "Enable l[bh]arx and st[bh]cx.">;
+def FeatureQuadwordAtomic : SubtargetFeature<"quadword-atomics",
+                                             "HasQuadwordAtomics", "true",
+                                             "Enable lqarx and stqcx.">;
 def FeatureInvariantFunctionDescriptors :
   SubtargetFeature<"invariant-function-descriptors",
                    "HasInvariantFunctionDescriptors", "true",
@@ -203,9 +213,13 @@ def FeatureSlowPOPCNTD : SubtargetFeature<"slow-popcntd","HasPOPCNTD",
 def DeprecatedDST    : SubtargetFeature<"", "DeprecatedDST", "true",
   "Treat vector data stream cache control instructions as deprecated">;
 
+def FeatureISA2_07 : SubtargetFeature<"isa-v207-instructions", "IsISA2_07",
+                                      "true",
+                                      "Enable instructions in ISA 2.07.">;
 def FeatureISA3_0 : SubtargetFeature<"isa-v30-instructions", "IsISA3_0",
                                      "true",
-                                     "Enable instructions in ISA 3.0.">;
+                                     "Enable instructions in ISA 3.0.",
+                                     [FeatureISA2_07]>;
 def FeatureISA3_1 : SubtargetFeature<"isa-v31-instructions", "IsISA3_1",
                                      "true",
                                      "Enable instructions in ISA 3.1.",
@@ -245,6 +259,13 @@ def FeatureMMA : SubtargetFeature<"mma", "HasMMA", "true",
                                   "Enable MMA instructions",
                                   [FeatureP8Vector, FeatureP9Altivec,
                                    FeaturePairedVectorMemops]>;
+def FeatureROPProtect :
+  SubtargetFeature<"rop-protect", "HasROPProtect", "true",
+                   "Add ROP protect">;
+
+def FeaturePrivileged :
+  SubtargetFeature<"privileged", "HasPrivileged", "true",
+                   "Add privileged instructions">;
 
 def FeaturePredictableSelectIsExpensive :
   SubtargetFeature<"predictable-select-expensive",
@@ -313,7 +334,9 @@ def ProcessorFeatures {
      FeatureDirectMove,
      FeatureICBT,
      FeaturePartwordAtomic,
-     FeaturePredictableSelectIsExpensive
+     FeatureQuadwordAtomic,
+     FeaturePredictableSelectIsExpensive,
+     FeatureISA2_07
     ];
 
   list<SubtargetFeature> P8SpecificFeatures = [FeatureAddiLoadFusion,
@@ -595,6 +618,13 @@ def PPCInstrInfo : InstrInfo {
   let noNamedPositionallyEncodedOperands = 1;
 }
 
+def PPCAsmWriter : AsmWriter {
+  string AsmWriterClassName  = "InstPrinter";
+  int PassSubtarget = 1;
+  int Variant = 0;
+  bit isMCAsmWriter = 1;
+}
+
 def PPCAsmParser : AsmParser {
   let ShouldEmitMatchRegisterName = 0;
 }
@@ -613,6 +643,7 @@ def PPC : Target {
   // Information about the instructions.
   let InstructionSet = PPCInstrInfo;
 
+  let AssemblyWriters = [PPCAsmWriter];
   let AssemblyParsers = [PPCAsmParser];
   let AssemblyParserVariants = [PPCAsmParserVariant];
   let AllowRegisterRenaming = 1;

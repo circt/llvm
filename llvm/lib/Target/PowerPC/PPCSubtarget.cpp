@@ -77,6 +77,7 @@ void PPCSubtarget::initializeEnvironment() {
   HasHardFloat = false;
   HasAltivec = false;
   HasSPE = false;
+  HasEFPU2 = false;
   HasFPU = false;
   HasVSX = false;
   NeedsTwoConstNR = false;
@@ -86,6 +87,8 @@ void PPCSubtarget::initializeEnvironment() {
   HasP9Vector = false;
   HasP9Altivec = false;
   HasMMA = false;
+  HasROPProtect = false;
+  HasPrivileged = false;
   HasP10Vector = false;
   HasPrefixInstrs = false;
   HasPCRelativeMemops = false;
@@ -116,6 +119,7 @@ void PPCSubtarget::initializeEnvironment() {
   HasICBT = false;
   HasInvariantFunctionDescriptors = false;
   HasPartwordAtomics = false;
+  HasQuadwordAtomics = false;
   HasDirectMove = false;
   HasHTM = false;
   HasFloat128 = false;
@@ -123,6 +127,7 @@ void PPCSubtarget::initializeEnvironment() {
   HasStoreFusion = false;
   HasAddiLoadFusion = false;
   HasAddisLoadFusion = false;
+  IsISA2_07 = false;
   IsISA3_0 = false;
   IsISA3_1 = false;
   UseLongCalls = false;
@@ -132,6 +137,8 @@ void PPCSubtarget::initializeEnvironment() {
   UsePPCPostRASchedStrategy = false;
   PairedVectorMemops = false;
   PredictableSelectIsExpensive = false;
+  HasModernAIXAs = false;
+  IsAIX = false;
 
   HasPOPCNTD = POPCNTD_Unavailable;
 }
@@ -178,8 +185,7 @@ void PPCSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
   StackAlignment = getPlatformStackAlignment();
 
   // Determine endianness.
-  // FIXME: Part of the TargetMachine.
-  IsLittleEndian = (TargetTriple.getArch() == Triple::ppc64le);
+  IsLittleEndian = TM.isLittleEndian();
 }
 
 bool PPCSubtarget::enableMachineScheduler() const { return true; }

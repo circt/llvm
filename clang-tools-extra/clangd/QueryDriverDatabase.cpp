@@ -136,24 +136,31 @@ llvm::Optional<DriverInfo> parseDriverOutput(llvm::StringRef Output) {
 }
 
 llvm::Optional<DriverInfo>
-extractSystemIncludesAndTarget(PathRef Driver, llvm::StringRef Lang,
+extractSystemIncludesAndTarget(llvm::SmallString<128> Driver,
+                               llvm::StringRef Lang,
                                llvm::ArrayRef<std::string> CommandLine,
                                const llvm::Regex &QueryDriverRegex) {
   trace::Span Tracer("Extract system includes and target");
+
+  if (!llvm::sys::path::is_absolute(Driver)) {
+    assert(llvm::none_of(
+        Driver, [](char C) { return llvm::sys::path::is_separator(C); }));
+    auto DriverProgram = llvm::sys::findProgramByName(Driver);
+    if (DriverProgram) {
+      vlog("System include extraction: driver {0} expanded to {1}", Driver,
+           *DriverProgram);
+      Driver = *DriverProgram;
+    } else {
+      elog("System include extraction: driver {0} not found in PATH", Driver);
+      return llvm::None;
+    }
+  }
+
   SPAN_ATTACH(Tracer, "driver", Driver);
   SPAN_ATTACH(Tracer, "lang", Lang);
 
   if (!QueryDriverRegex.match(Driver)) {
     vlog("System include extraction: not allowed driver {0}", Driver);
-    return llvm::None;
-  }
-
-  if (!llvm::sys::fs::exists(Driver)) {
-    elog("System include extraction: {0} does not exist.", Driver);
-    return llvm::None;
-  }
-  if (!llvm::sys::fs::can_execute(Driver)) {
-    elog("System include extraction: {0} is not executable.", Driver);
     return llvm::None;
   }
 
@@ -168,8 +175,7 @@ extractSystemIncludesAndTarget(PathRef Driver, llvm::StringRef Lang,
   auto CleanUp = llvm::make_scope_exit(
       [&StdErrPath]() { llvm::sys::fs::remove(StdErrPath); });
 
-  llvm::Optional<llvm::StringRef> Redirects[] = {
-      {""}, {""}, llvm::StringRef(StdErrPath)};
+  llvm::Optional<llvm::StringRef> Redirects[] = {{""}, {""}, StdErrPath.str()};
 
   llvm::SmallVector<llvm::StringRef> Args = {Driver, "-E", "-x",
                                              Lang,   "-",  "-v"};
@@ -203,11 +209,13 @@ extractSystemIncludesAndTarget(PathRef Driver, llvm::StringRef Lang,
     }
   }
 
+  std::string ErrMsg;
   if (int RC = llvm::sys::ExecuteAndWait(Driver, Args, /*Env=*/llvm::None,
-                                         Redirects)) {
+                                         Redirects, /*SecondsToWait=*/0,
+                                         /*MemoryLimit=*/0, &ErrMsg)) {
     elog("System include extraction: driver execution failed with return code: "
-         "{0}. Args: ['{1}']",
-         llvm::to_string(RC), llvm::join(Args, "', '"));
+         "{0} - '{1}'. Args: [{2}]",
+         llvm::to_string(RC), ErrMsg, printArgv(Args));
     return llvm::None;
   }
 
@@ -294,22 +302,16 @@ llvm::Regex convertGlobsToRegex(llvm::ArrayRef<std::string> Globs) {
 /// Extracts system includes from a trusted driver by parsing the output of
 /// include search path and appends them to the commands coming from underlying
 /// compilation database.
-class QueryDriverDatabase : public GlobalCompilationDatabase {
+class QueryDriverDatabase : public DelegatingCDB {
 public:
   QueryDriverDatabase(llvm::ArrayRef<std::string> QueryDriverGlobs,
                       std::unique_ptr<GlobalCompilationDatabase> Base)
-      : QueryDriverRegex(convertGlobsToRegex(QueryDriverGlobs)),
-        Base(std::move(Base)) {
-    assert(this->Base);
-    BaseChanged =
-        this->Base->watch([this](const std::vector<std::string> &Changes) {
-          OnCommandChanged.broadcast(Changes);
-        });
-  }
+      : DelegatingCDB(std::move(Base)),
+        QueryDriverRegex(convertGlobsToRegex(QueryDriverGlobs)) {}
 
   llvm::Optional<tooling::CompileCommand>
   getCompileCommand(PathRef File) const override {
-    auto Cmd = Base->getCompileCommand(File);
+    auto Cmd = DelegatingCDB::getCompileCommand(File);
     if (!Cmd || Cmd->CommandLine.empty())
       return Cmd;
 
@@ -332,7 +334,11 @@ public:
     }
 
     llvm::SmallString<128> Driver(Cmd->CommandLine.front());
-    llvm::sys::fs::make_absolute(Cmd->Directory, Driver);
+    if (llvm::any_of(Driver,
+                       [](char C) { return llvm::sys::path::is_separator(C); }))
+      // Driver is a not a single executable name but instead a path (either
+      // relative or absolute).
+      llvm::sys::fs::make_absolute(Cmd->Directory, Driver);
 
     if (auto Info =
             QueriedDrivers.get(/*Key=*/(Driver + ":" + Lang).str(), [&] {
@@ -344,17 +350,10 @@ public:
     return Cmd;
   }
 
-  llvm::Optional<ProjectInfo> getProjectInfo(PathRef File) const override {
-    return Base->getProjectInfo(File);
-  }
-
 private:
   // Caches includes extracted from a driver. Key is driver:lang.
   Memoize<llvm::StringMap<llvm::Optional<DriverInfo>>> QueriedDrivers;
   llvm::Regex QueryDriverRegex;
-
-  std::unique_ptr<GlobalCompilationDatabase> Base;
-  CommandChanged::Subscription BaseChanged;
 };
 } // namespace
 

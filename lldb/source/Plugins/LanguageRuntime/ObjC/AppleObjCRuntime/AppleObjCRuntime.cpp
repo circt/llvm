@@ -48,7 +48,7 @@ LLDB_PLUGIN_DEFINE(AppleObjCRuntime)
 
 char AppleObjCRuntime::ID = 0;
 
-AppleObjCRuntime::~AppleObjCRuntime() {}
+AppleObjCRuntime::~AppleObjCRuntime() = default;
 
 AppleObjCRuntime::AppleObjCRuntime(Process *process)
     : ObjCLanguageRuntime(process), m_read_objc_library(false),
@@ -377,12 +377,7 @@ AppleObjCRuntime::GetObjCVersion(Process *process, ModuleSP &objc_module_sp) {
       llvm::Triple::VendorType::Apple)
     return ObjCRuntimeVersions::eObjC_VersionUnknown;
 
-  const ModuleList &target_modules = target.GetImages();
-  std::lock_guard<std::recursive_mutex> gaurd(target_modules.GetMutex());
-
-  size_t num_images = target_modules.GetSize();
-  for (size_t i = 0; i < num_images; i++) {
-    ModuleSP module_sp = target_modules.GetModuleAtIndexUnlocked(i);
+  for (ModuleSP module_sp : target.GetImages().Modules()) {
     // One tricky bit here is that we might get called as part of the initial
     // module loading, but before all the pre-run libraries get winnowed from
     // the module list.  So there might actually be an old and incorrect ObjC

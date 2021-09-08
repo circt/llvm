@@ -55,6 +55,7 @@ public:
 
   constexpr Real() {} // +0.0
   constexpr Real(const Real &) = default;
+  constexpr Real(Real &&) = default;
   constexpr Real(const Word &bits) : word_{bits} {}
   constexpr Real &operator=(const Real &) = default;
   constexpr Real &operator=(Real &&) = default;
@@ -62,10 +63,6 @@ public:
   constexpr bool operator==(const Real &that) const {
     return word_ == that.word_;
   }
-
-  // TODO: DIM, MAX, MIN, DPROD, FRACTION,
-  // INT/NINT, NEAREST, OUT_OF_RANGE,
-  // RRSPACING/SPACING, SCALE, SET_EXPONENT
 
   constexpr bool IsSignBitSet() const { return word_.BTEST(bits - 1); }
   constexpr bool IsNegative() const {
@@ -84,6 +81,7 @@ public:
   constexpr bool IsInfinite() const {
     return Exponent() == maxExponent && GetSignificand().IsZero();
   }
+  constexpr bool IsFinite() const { return Exponent() != maxExponent; }
   constexpr bool IsZero() const {
     return Exponent() == 0 && GetSignificand().IsZero();
   }
@@ -117,8 +115,10 @@ public:
   ValueWithRealFlags<Real> Divide(
       const Real &, Rounding rounding = defaultRounding) const;
 
-  // SQRT(x**2 + y**2) but computed so as to avoid spurious overflow
-  // TODO: needed for CABS
+  ValueWithRealFlags<Real> SQRT(Rounding rounding = defaultRounding) const;
+
+  // HYPOT(x,y)=SQRT(x**2 + y**2) computed so as to avoid spurious
+  // intermediate overflows.
   ValueWithRealFlags<Real> HYPOT(
       const Real &, Rounding rounding = defaultRounding) const;
 

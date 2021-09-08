@@ -55,13 +55,12 @@ LegalityPredicate LegalityPredicates::typePairAndMemDescInSet(
   SmallVector<TypePairAndMemDesc, 4> TypesAndMemDesc = TypesAndMemDescInit;
   return [=](const LegalityQuery &Query) {
     TypePairAndMemDesc Match = {Query.Types[TypeIdx0], Query.Types[TypeIdx1],
-                                Query.MMODescrs[MMOIdx].SizeInBits,
+                                Query.MMODescrs[MMOIdx].MemoryTy,
                                 Query.MMODescrs[MMOIdx].AlignInBits};
-    return std::find_if(
-      TypesAndMemDesc.begin(), TypesAndMemDesc.end(),
-      [=](const TypePairAndMemDesc &Entry) ->bool {
-        return Match.isCompatible(Entry);
-      }) != TypesAndMemDesc.end();
+    return llvm::any_of(TypesAndMemDesc,
+                        [=](const TypePairAndMemDesc &Entry) -> bool {
+                          return Match.isCompatible(Entry);
+                        });
   };
 }
 
@@ -154,6 +153,14 @@ LegalityPredicate LegalityPredicates::scalarOrEltSizeNotPow2(unsigned TypeIdx) {
   };
 }
 
+LegalityPredicate LegalityPredicates::sizeNotMultipleOf(unsigned TypeIdx,
+                                                        unsigned Size) {
+  return [=](const LegalityQuery &Query) {
+    const LLT QueryTy = Query.Types[TypeIdx];
+    return QueryTy.isScalar() && QueryTy.getSizeInBits() % Size != 0;
+  };
+}
+
 LegalityPredicate LegalityPredicates::sizeNotPow2(unsigned TypeIdx) {
   return [=](const LegalityQuery &Query) {
     const LLT QueryTy = Query.Types[TypeIdx];
@@ -177,7 +184,7 @@ LegalityPredicate LegalityPredicates::sameSize(unsigned TypeIdx0,
 
 LegalityPredicate LegalityPredicates::memSizeInBytesNotPow2(unsigned MMOIdx) {
   return [=](const LegalityQuery &Query) {
-    return !isPowerOf2_32(Query.MMODescrs[MMOIdx].SizeInBits / 8);
+    return !isPowerOf2_32(Query.MMODescrs[MMOIdx].MemoryTy.getSizeInBytes());
   };
 }
 

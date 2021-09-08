@@ -109,6 +109,8 @@ public:
 
   // Pretty print this attribute.
   void printPretty(raw_ostream &OS, const PrintingPolicy &Policy) const;
+
+  static StringRef getDocumentation(attr::Kind);
 };
 
 class TypeAttr : public Attr {
@@ -162,6 +164,21 @@ public:
   }
 };
 
+class DeclOrStmtAttr : public InheritableAttr {
+protected:
+  DeclOrStmtAttr(ASTContext &Context, const AttributeCommonInfo &CommonInfo,
+                 attr::Kind AK, bool IsLateParsed,
+                 bool InheritEvenIfAlreadyPresent)
+      : InheritableAttr(Context, CommonInfo, AK, IsLateParsed,
+                        InheritEvenIfAlreadyPresent) {}
+
+public:
+  static bool classof(const Attr *A) {
+    return A->getKind() >= attr::FirstDeclOrStmtAttr &&
+           A->getKind() <= attr::LastDeclOrStmtAttr;
+  }
+};
+
 class InheritableParamAttr : public InheritableAttr {
 protected:
   InheritableParamAttr(ASTContext &Context,
@@ -193,6 +210,8 @@ public:
     switch (getKind()) {
     case attr::SwiftContext:
       return ParameterABI::SwiftContext;
+    case attr::SwiftAsyncContext:
+      return ParameterABI::SwiftAsyncContext;
     case attr::SwiftErrorResult:
       return ParameterABI::SwiftErrorResult;
     case attr::SwiftIndirectResult:

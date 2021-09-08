@@ -39,6 +39,18 @@ TEST(ASTNodeKind, Bases) {
   EXPECT_TRUE(DNT<Decl>().isSame(DNT<Decl>()));
 }
 
+TEST(DynTypedNode, Clades) {
+  EXPECT_TRUE(DNT<Stmt>().getCladeKind().isSame(DNT<Stmt>()));
+  EXPECT_TRUE(DNT<Decl>().getCladeKind().isSame(DNT<Decl>()));
+
+  EXPECT_TRUE(DNT<CXXMethodDecl>().getCladeKind().isSame(DNT<Decl>()));
+  EXPECT_TRUE(DNT<CXXMemberCallExpr>().getCladeKind().isSame(DNT<Stmt>()));
+
+  EXPECT_FALSE(DNT<CXXMemberCallExpr>().getCladeKind().isSame(DNT<Decl>()));
+
+  EXPECT_TRUE(ASTNodeKind().getCladeKind().isNone());
+}
+
 TEST(ASTNodeKind, BaseDistances) {
   unsigned Distance = 1;
   EXPECT_TRUE(DNT<Expr>().isBaseOf(DNT<Expr>(), &Distance));
@@ -120,6 +132,7 @@ TEST(ASTNodeKind, Name) {
   VERIFY_NAME(CallExpr);
   VERIFY_NAME(Type);
   VERIFY_NAME(ConstantArrayType);
+  VERIFY_NAME(NonNullAttr);
 #undef VERIFY_NAME
 }
 
@@ -146,6 +159,13 @@ TEST(DynTypedNode, NNSLocSourceRange) {
   Verifier.expectRange(1, 33, 1, 34);
   EXPECT_TRUE(Verifier.match("namespace N { typedef void T; } N::T f() {}",
                              nestedNameSpecifierLoc()));
+}
+
+TEST(DynTypedNode, AttrSourceRange) {
+  RangeVerifier<DynTypedNode> Verifier;
+  Verifier.expectRange(1, 31, 1, 31);
+  EXPECT_TRUE(Verifier.match("void x(char *y __attribute__((nonnull)) );",
+                             ast_matchers::attr()));
 }
 
 TEST(DynTypedNode, DeclDump) {

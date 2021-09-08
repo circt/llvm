@@ -1,5 +1,5 @@
 # REQUIRES: x86
-# RUN: split-file %s %t
+# RUN: rm -rf %t; split-file %s %t
 
 # RUN: llvm-mc -filetype=obj -triple=x86_64-apple-darwin %t/common.s -o %t/common.o
 # RUN: llvm-mc -filetype=obj -triple=x86_64-apple-darwin %t/weak-common.s -o %t/weak-common.o
@@ -11,9 +11,9 @@
 
 # RUN: %lld -lSystem -order_file %t/order -dylib %t/libfoo.o -o %t/libfoo.dylib
 
-# RUN: rm -f %t/defined.a %t/weak-defined-and-common.a
 # RUN: llvm-ar rcs %t/defined.a %t/defined.o
 # RUN: llvm-ar rcs %t/weak-defined-and-common.a %t/weak-defined.o %t/common.o
+# RUN: llvm-ar rcs %t/common-and-weak-defined.a %t/common.o %t/weak-defined.o
 
 ## The weak attribute appears to have no effect on common symbols. Given two
 ## common symbols of the same name, we always pick the one with the larger size,
@@ -42,12 +42,11 @@
 # RUN: %lld -lSystem -order_file %t/order %t/weak-common.o %t/defined.a %t/test.o -o %t/test
 # RUN: llvm-objdump --syms %t/test | FileCheck %s --check-prefix=LARGER-COMMON
 
-## If an archive has both a common and a defined symbol, the defined one should
-## win.
+## Defined symbols have the same precedence as common symbols within an archive.
 # RUN: %lld -lSystem -order_file %t/order %t/weak-defined-and-common.a %t/calls-foo.o -o %t/calls-foo
 # RUN: llvm-objdump --syms %t/calls-foo | FileCheck %s --check-prefix=WEAK-DEFINED
-# RUN: %lld -lSystem -order_file %t/order %t/calls-foo.o %t/weak-defined-and-common.a -o %t/calls-foo
-# RUN: llvm-objdump --syms %t/calls-foo | FileCheck %s --check-prefix=WEAK-DEFINED
+# RUN: %lld -lSystem -order_file %t/order %t/calls-foo.o %t/common-and-weak-defined.a -o %t/calls-foo
+# RUN: llvm-objdump --syms %t/calls-foo | FileCheck %s --check-prefix=COMMON
 
 ## Common symbols take precedence over dylib symbols.
 # RUN: %lld -lSystem -order_file %t/order %t/libfoo.dylib %t/weak-common.o %t/test.o -o %t/test
@@ -55,14 +54,11 @@
 # RUN: %lld -lSystem -order_file %t/order %t/weak-common.o %t/libfoo.dylib %t/test.o -o %t/test
 # RUN: llvm-objdump --syms %t/test | FileCheck %s --check-prefix=LARGER-COMMON
 
-# LARGER-COMMON-LABEL: SYMBOL TABLE:
 # LARGER-COMMON-DAG:   [[#%x, FOO_ADDR:]] g     O __DATA,__common _foo
 # LARGER-COMMON-DAG:   [[#FOO_ADDR + 2]]  g     O __DATA,__common _foo_end
 
-# DEFINED-LABEL:       SYMBOL TABLE:
+# COMMON:              g     O __DATA,__common _foo
 # DEFINED:             g     F __TEXT,__text _foo
-
-# WEAK-DEFINED-LABEL:  SYMBOL TABLE:
 # WEAK-DEFINED:        w     F __TEXT,__text _foo
 
 #--- order

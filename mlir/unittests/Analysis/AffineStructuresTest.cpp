@@ -7,6 +7,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Analysis/AffineStructures.h"
+#include "mlir/IR/IntegerSet.h"
+#include "mlir/IR/MLIRContext.h"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -15,31 +17,47 @@
 
 namespace mlir {
 
-/// If 'hasValue' is true, check that findIntegerSample returns a valid sample
+enum class TestFunction { Sample, Empty };
+
+/// If fn is TestFunction::Sample (default):
+/// If hasSample is true, check that findIntegerSample returns a valid sample
 /// for the FlatAffineConstraints fac.
+/// If hasSample is false, check that findIntegerSample returns None.
 ///
-/// If hasValue is false, check that findIntegerSample does not return None.
-static void checkSample(bool hasValue, const FlatAffineConstraints &fac) {
-  Optional<SmallVector<int64_t, 8>> maybeSample = fac.findIntegerSample();
-  if (!hasValue) {
-    EXPECT_FALSE(maybeSample.hasValue());
-    if (maybeSample.hasValue()) {
-      for (auto x : *maybeSample)
-        llvm::errs() << x << ' ';
-      llvm::errs() << '\n';
+/// If fn is TestFunction::Empty, check that isIntegerEmpty returns the
+/// opposite of hasSample.
+static void checkSample(bool hasSample, const FlatAffineConstraints &fac,
+                        TestFunction fn = TestFunction::Sample) {
+  Optional<SmallVector<int64_t, 8>> maybeSample;
+  switch (fn) {
+  case TestFunction::Sample:
+    maybeSample = fac.findIntegerSample();
+    if (!hasSample) {
+      EXPECT_FALSE(maybeSample.hasValue());
+      if (maybeSample.hasValue()) {
+        for (auto x : *maybeSample)
+          llvm::errs() << x << ' ';
+        llvm::errs() << '\n';
+      }
+    } else {
+      ASSERT_TRUE(maybeSample.hasValue());
+      EXPECT_TRUE(fac.containsPoint(*maybeSample));
     }
-  } else {
-    ASSERT_TRUE(maybeSample.hasValue());
-    EXPECT_TRUE(fac.containsPoint(*maybeSample));
+    break;
+  case TestFunction::Empty:
+    EXPECT_EQ(!hasSample, fac.isIntegerEmpty());
+    break;
   }
 }
 
 /// Construct a FlatAffineConstraints from a set of inequality and
 /// equality constraints.
 static FlatAffineConstraints
-makeFACFromConstraints(unsigned dims, ArrayRef<SmallVector<int64_t, 4>> ineqs,
-                       ArrayRef<SmallVector<int64_t, 4>> eqs) {
-  FlatAffineConstraints fac(ineqs.size(), eqs.size(), dims + 1, dims);
+makeFACFromConstraints(unsigned ids, ArrayRef<SmallVector<int64_t, 4>> ineqs,
+                       ArrayRef<SmallVector<int64_t, 4>> eqs,
+                       unsigned syms = 0) {
+  FlatAffineConstraints fac(ineqs.size(), eqs.size(), ids + 1, ids - syms, syms,
+                            /*numLocals=*/0);
   for (const auto &eq : eqs)
     fac.addEquality(eq);
   for (const auto &ineq : ineqs)
@@ -52,9 +70,11 @@ makeFACFromConstraints(unsigned dims, ArrayRef<SmallVector<int64_t, 4>> ineqs,
 /// orderings may cause the algorithm to proceed differently. At least some of
 ///.these permutations should make it past the heuristics and test the
 /// implementation of the GBR algorithm itself.
-static void checkPermutationsSample(bool hasValue, unsigned nDim,
+/// Use TestFunction fn to test.
+static void checkPermutationsSample(bool hasSample, unsigned nDim,
                                     ArrayRef<SmallVector<int64_t, 4>> ineqs,
-                                    ArrayRef<SmallVector<int64_t, 4>> eqs) {
+                                    ArrayRef<SmallVector<int64_t, 4>> eqs,
+                                    TestFunction fn = TestFunction::Sample) {
   SmallVector<unsigned, 4> perm(nDim);
   std::iota(perm.begin(), perm.end(), 0);
   auto permute = [&perm](ArrayRef<int64_t> coeffs) {
@@ -71,8 +91,8 @@ static void checkPermutationsSample(bool hasValue, unsigned nDim,
     for (const auto &eq : eqs)
       permutedEqs.push_back(permute(eq));
 
-    checkSample(hasValue,
-                makeFACFromConstraints(nDim, permutedIneqs, permutedEqs));
+    checkSample(hasSample,
+                makeFACFromConstraints(nDim, permutedIneqs, permutedEqs), fn);
   } while (std::next_permutation(perm.begin(), perm.end()));
 }
 
@@ -196,6 +216,132 @@ TEST(FlatAffineConstraintsTest, FindSampleTest) {
                                                {0, -2, 99}, // 2y <= 99.
                                            },
                                            {}));
+  // 2D cone with apex at (10000, 10000) and
+  // edges passing through (1/3, 0) and (2/3, 0).
+  checkSample(
+      true,
+      makeFACFromConstraints(
+          2, {{300000, -299999, -100000}, {-300000, 299998, 200000}}, {}));
+
+  // Cartesian product of a tetrahedron and a 2D cone.
+  // The tetrahedron has vertices at
+  // (1/3, 0, 0), (2/3, 0, 0), (2/3, 0, 10000), and (10000, 10000, 10000).
+  // The first three points form a triangular base on the xz plane with the
+  // apex at the fourth point, which is the only integer point.
+  // The cone has apex at (10000, 10000) and
+  // edges passing through (1/3, 0) and (2/3, 0).
+  checkPermutationsSample(
+      true /* not empty */, 5,
+      {
+          // Tetrahedron contraints:
+          {0, 1, 0, 0, 0, 0},  // y >= 0
+          {0, -1, 1, 0, 0, 0}, // z >= y
+                               // -300000x + 299998y + 100000 + z <= 0.
+          {300000, -299998, -1, 0, 0, -100000},
+          // -150000x + 149999y + 100000 >= 0.
+          {-150000, 149999, 0, 0, 0, 100000},
+
+          // Triangle constraints:
+          // 300000p - 299999q >= 100000
+          {0, 0, 0, 300000, -299999, -100000},
+          // -300000p + 299998q + 200000 >= 0
+          {0, 0, 0, -300000, 299998, 200000},
+      },
+      {});
+
+  // Cartesian product of same tetrahedron as above and {(p, q) : 1/3 <= p <=
+  // 2/3}. Since the second set is empty, the whole set is too.
+  checkPermutationsSample(
+      false /* empty */, 5,
+      {
+          // Tetrahedron contraints:
+          {0, 1, 0, 0, 0, 0},  // y >= 0
+          {0, -1, 1, 0, 0, 0}, // z >= y
+                               // -300000x + 299998y + 100000 + z <= 0.
+          {300000, -299998, -1, 0, 0, -100000},
+          // -150000x + 149999y + 100000 >= 0.
+          {-150000, 149999, 0, 0, 0, 100000},
+
+          // Second set constraints:
+          // 3p >= 1
+          {0, 0, 0, 3, 0, -1},
+          // 3p <= 2
+          {0, 0, 0, -3, 0, 2},
+      },
+      {});
+
+  // Cartesian product of same tetrahedron as above and
+  // {(p, q, r) : 1 <= p <= 2 and p = 3q + 3r}.
+  // Since the second set is empty, the whole set is too.
+  checkPermutationsSample(
+      false /* empty */, 5,
+      {
+          // Tetrahedron contraints:
+          {0, 1, 0, 0, 0, 0, 0},  // y >= 0
+          {0, -1, 1, 0, 0, 0, 0}, // z >= y
+                                  // -300000x + 299998y + 100000 + z <= 0.
+          {300000, -299998, -1, 0, 0, 0, -100000},
+          // -150000x + 149999y + 100000 >= 0.
+          {-150000, 149999, 0, 0, 0, 0, 100000},
+
+          // Second set constraints:
+          // p >= 1
+          {0, 0, 0, 1, 0, 0, -1},
+          // p <= 2
+          {0, 0, 0, -1, 0, 0, 2},
+      },
+      {
+          {0, 0, 0, 1, -3, -3, 0}, // p = 3q + 3r
+      });
+
+  // Cartesian product of a tetrahedron and a 2D cone.
+  // The tetrahedron is empty and has vertices at
+  // (1/3, 0, 0), (2/3, 0, 0), (2/3, 0, 100), and (100, 100 - 1/3, 100).
+  // The cone has apex at (10000, 10000) and
+  // edges passing through (1/3, 0) and (2/3, 0).
+  // Since the tetrahedron is empty, the Cartesian product is too.
+  checkPermutationsSample(false /* empty */, 5,
+                          {
+                              // Tetrahedron contraints:
+                              {0, 1, 0, 0, 0, 0},
+                              {0, -300, 299, 0, 0, 0},
+                              {300 * 299, -89400, -299, 0, 0, -100 * 299},
+                              {-897, 894, 0, 0, 0, 598},
+
+                              // Triangle constraints:
+                              // 300000p - 299999q >= 100000
+                              {0, 0, 0, 300000, -299999, -100000},
+                              // -300000p + 299998q + 200000 >= 0
+                              {0, 0, 0, -300000, 299998, 200000},
+                          },
+                          {});
+
+  // Cartesian product of same tetrahedron as above and
+  // {(p, q) : 1/3 <= p <= 2/3}.
+  checkPermutationsSample(false /* empty */, 5,
+                          {
+                              // Tetrahedron contraints:
+                              {0, 1, 0, 0, 0, 0},
+                              {0, -300, 299, 0, 0, 0},
+                              {300 * 299, -89400, -299, 0, 0, -100 * 299},
+                              {-897, 894, 0, 0, 0, 598},
+
+                              // Second set constraints:
+                              // 3p >= 1
+                              {0, 0, 0, 3, 0, -1},
+                              // 3p <= 2
+                              {0, 0, 0, -3, 0, 2},
+                          },
+                          {});
+
+  checkSample(true, makeFACFromConstraints(3,
+                                           {
+                                               {2, 0, 0, -1}, // 2x >= 1
+                                           },
+                                           {{
+                                               {1, -1, 0, -1}, // y = x - 1
+                                               {0, 1, -1, 0},  // z = y
+                                           }}));
 }
 
 TEST(FlatAffineConstraintsTest, IsIntegerEmptyTest) {
@@ -206,17 +352,36 @@ TEST(FlatAffineConstraintsTest, IsIntegerEmptyTest) {
   EXPECT_FALSE(
       makeFACFromConstraints(1, {{5, -1}, {-5, 9}}, {}).isIntegerEmpty());
 
-  // An unbounded set, which isIntegerEmpty should detect as unbounded and
-  // return without calling findIntegerSample.
+  // Unbounded sets.
+  EXPECT_TRUE(makeFACFromConstraints(3,
+                                     {
+                                         {0, 2, 0, -1}, // 2y >= 1
+                                         {0, -2, 0, 1}, // 2y <= 1
+                                         {0, 0, 2, -1}, // 2z >= 1
+                                     },
+                                     {{2, 0, 0, -1}} // 2x = 1
+                                     )
+                  .isIntegerEmpty());
+
   EXPECT_FALSE(makeFACFromConstraints(3,
                                       {
-                                          {2, 0, 0, -1},
-                                          {-2, 0, 0, 1},
-                                          {0, 2, 0, -1},
-                                          {0, -2, 0, 1},
-                                          {0, 0, 2, -1},
+                                          {2, 0, 0, -1},  // 2x >= 1
+                                          {-3, 0, 0, 3},  // 3x <= 3
+                                          {0, 0, 5, -6},  // 5z >= 6
+                                          {0, 0, -7, 17}, // 7z <= 17
+                                          {0, 3, 0, -2},  // 3y >= 2
                                       },
                                       {})
+                   .isIntegerEmpty());
+
+  EXPECT_FALSE(makeFACFromConstraints(3,
+                                      {
+                                          {2, 0, 0, -1}, // 2x >= 1
+                                      },
+                                      {{
+                                          {1, -1, 0, -1}, // y = x - 1
+                                          {0, 1, -1, 0},  // z = y
+                                      }})
                    .isIntegerEmpty());
 
   // FlatAffineConstraints::isEmpty() does not detect the following sets to be
@@ -258,6 +423,17 @@ TEST(FlatAffineConstraintsTest, IsIntegerEmptyTest) {
                   },
                   {{2, -3, 0, 0, 0}, {1, -1, 6, 0, -1}, {1, 1, 0, -6, -2}})
                   .isIntegerEmpty());
+
+  // Set with symbols.
+  FlatAffineConstraints fac6 = makeFACFromConstraints(2,
+                                                      {
+                                                          {1, 1, 0},
+                                                      },
+                                                      {
+                                                          {1, -1, 0},
+                                                      },
+                                                      1);
+  EXPECT_FALSE(fac6.isIntegerEmpty());
 }
 
 TEST(FlatAffineConstraintsTest, removeRedundantConstraintsTest) {
@@ -371,6 +547,168 @@ TEST(FlatAffineConstraintsTest, removeRedundantConstraintsTest) {
     // Ensure that the removed constraint was the redundant constraint [3].
     EXPECT_NE(fac5.getInequality(i), ArrayRef<int64_t>(redundantConstraint));
   }
+}
+
+TEST(FlatAffineConstraintsTest, addConstantUpperBound) {
+  FlatAffineConstraints fac = makeFACFromConstraints(2, {}, {});
+  fac.addBound(FlatAffineConstraints::UB, 0, 1);
+  EXPECT_EQ(fac.atIneq(0, 0), -1);
+  EXPECT_EQ(fac.atIneq(0, 1), 0);
+  EXPECT_EQ(fac.atIneq(0, 2), 1);
+
+  fac.addBound(FlatAffineConstraints::UB, {1, 2, 3}, 1);
+  EXPECT_EQ(fac.atIneq(1, 0), -1);
+  EXPECT_EQ(fac.atIneq(1, 1), -2);
+  EXPECT_EQ(fac.atIneq(1, 2), -2);
+}
+
+TEST(FlatAffineConstraintsTest, addConstantLowerBound) {
+  FlatAffineConstraints fac = makeFACFromConstraints(2, {}, {});
+  fac.addBound(FlatAffineConstraints::LB, 0, 1);
+  EXPECT_EQ(fac.atIneq(0, 0), 1);
+  EXPECT_EQ(fac.atIneq(0, 1), 0);
+  EXPECT_EQ(fac.atIneq(0, 2), -1);
+
+  fac.addBound(FlatAffineConstraints::LB, {1, 2, 3}, 1);
+  EXPECT_EQ(fac.atIneq(1, 0), 1);
+  EXPECT_EQ(fac.atIneq(1, 1), 2);
+  EXPECT_EQ(fac.atIneq(1, 2), 2);
+}
+
+TEST(FlatAffineConstraintsTest, clearConstraints) {
+  FlatAffineConstraints fac = makeFACFromConstraints(1, {}, {});
+
+  fac.addInequality({1, 0});
+  EXPECT_EQ(fac.atIneq(0, 0), 1);
+  EXPECT_EQ(fac.atIneq(0, 1), 0);
+
+  fac.clearConstraints();
+
+  fac.addInequality({1, 0});
+  EXPECT_EQ(fac.atIneq(0, 0), 1);
+  EXPECT_EQ(fac.atIneq(0, 1), 0);
+}
+
+/// Check if the expected division representation of local variables matches the
+/// computed representation. The expected division representation is given as
+/// a vector of expressions set in `divisions` and the corressponding
+/// denominator in `denoms`. If expected denominator for a variable is
+/// non-positive, the local variable is expected to not have a computed
+/// representation.
+static void checkDivisionRepresentation(
+    FlatAffineConstraints &fac,
+    const std::vector<SmallVector<int64_t, 8>> &divisions,
+    const SmallVector<int64_t, 8> &denoms) {
+
+  assert(divisions.size() == fac.getNumLocalIds() &&
+         "Size of expected divisions does not match number of local variables");
+  assert(
+      denoms.size() == fac.getNumLocalIds() &&
+      "Size of expected denominators does not match number of local variables");
+
+  std::vector<llvm::Optional<std::pair<unsigned, unsigned>>> res(
+      fac.getNumLocalIds(), llvm::None);
+  fac.getLocalReprLbUbPairs(res);
+
+  // Check if all expected divisions are computed.
+  for (unsigned i = 0, e = fac.getNumLocalIds(); i < e; ++i)
+    if (denoms[i] > 0)
+      EXPECT_TRUE(res[i].hasValue());
+    else
+      EXPECT_FALSE(res[i].hasValue());
+
+  unsigned divOffset = fac.getNumDimAndSymbolIds();
+  for (unsigned i = 0, e = fac.getNumLocalIds(); i < e; ++i) {
+    if (!res[i])
+      continue;
+
+    // Check if the bounds are of the form:
+    //      0 <= expr - divisor * id <= divisor - 1
+    // Rearranging, we have:
+    //       divisor * id - expr + (divisor - 1) >= 0  <-- Lower bound for 'id'
+    //      -divisor * id + expr                 >= 0  <-- Upper bound for 'id'
+    // where `id = expr floordiv divisor`.
+    unsigned ubPos = res[i]->first, lbPos = res[i]->second;
+    const SmallVector<int64_t, 8> &expr = divisions[i];
+
+    // Check if lower bound is of the correct form.
+    int64_t computedDivisorLb = fac.atIneq(lbPos, i + divOffset);
+    EXPECT_EQ(computedDivisorLb, denoms[i]);
+    for (unsigned c = 0, f = fac.getNumLocalIds(); c < f; ++c) {
+      if (c == i + divOffset)
+        continue;
+      EXPECT_EQ(fac.atIneq(lbPos, c), -expr[c]);
+    }
+    // Check if constant term of lower bound matches expected constant term.
+    EXPECT_EQ(fac.atIneq(lbPos, fac.getNumCols() - 1),
+              -expr.back() + (denoms[i] - 1));
+
+    // Check if upper bound is of the correct form.
+    int64_t computedDivisorUb = fac.atIneq(ubPos, i + divOffset);
+    EXPECT_EQ(computedDivisorUb, -denoms[i]);
+    for (unsigned c = 0, f = fac.getNumLocalIds(); c < f; ++c) {
+      if (c == i + divOffset)
+        continue;
+      EXPECT_EQ(fac.atIneq(ubPos, c), expr[c]);
+    }
+    // Check if constant term of upper bound matches expected constant term.
+    EXPECT_EQ(fac.atIneq(ubPos, fac.getNumCols() - 1), expr.back());
+  }
+}
+
+TEST(FlatAffineConstraintsTest, computeLocalReprSimple) {
+  FlatAffineConstraints fac = makeFACFromConstraints(1, {}, {});
+
+  fac.addLocalFloorDiv({1, 4}, 10);
+  fac.addLocalFloorDiv({1, 0, 100}, 10);
+
+  std::vector<SmallVector<int64_t, 8>> divisions = {{1, 0, 0, 4},
+                                                    {1, 0, 0, 100}};
+  SmallVector<int64_t, 8> denoms = {10, 10};
+
+  // Check if floordivs can be computed when no other inequalities exist
+  // and floor divs do not depend on each other.
+  checkDivisionRepresentation(fac, divisions, denoms);
+}
+
+TEST(FlatAffineConstraintsTest, computeLocalReprConstantFloorDiv) {
+  FlatAffineConstraints fac = makeFACFromConstraints(4, {}, {});
+
+  fac.addInequality({1, 0, 3, 1, 2});
+  fac.addInequality({1, 2, -8, 1, 10});
+  fac.addEquality({1, 2, -4, 1, 10});
+
+  fac.addLocalFloorDiv({0, 0, 0, 0, 10}, 30);
+  fac.addLocalFloorDiv({0, 0, 0, 0, 0, 99}, 101);
+
+  std::vector<SmallVector<int64_t, 8>> divisions = {{0, 0, 0, 0, 0, 0, 10},
+                                                    {0, 0, 0, 0, 0, 0, 99}};
+  SmallVector<int64_t, 8> denoms = {30, 101};
+
+  // Check if floordivs with constant numerator can be computed.
+  checkDivisionRepresentation(fac, divisions, denoms);
+}
+
+TEST(FlatAffineConstraintsTest, computeLocalReprRecursive) {
+  FlatAffineConstraints fac = makeFACFromConstraints(4, {}, {});
+  fac.addInequality({1, 0, 3, 1, 2});
+  fac.addInequality({1, 2, -8, 1, 10});
+  fac.addEquality({1, 2, -4, 1, 10});
+
+  fac.addLocalFloorDiv({0, -2, 7, 2, 10}, 3);
+  fac.addLocalFloorDiv({3, 0, 9, 2, 2, 10}, 5);
+  fac.addLocalFloorDiv({0, 1, -123, 2, 0, -4, 10}, 3);
+
+  fac.addInequality({1, 2, -2, 1, -5, 0, 6, 100});
+  fac.addInequality({1, 2, -8, 1, 3, 7, 0, -9});
+
+  std::vector<SmallVector<int64_t, 8>> divisions = {{0, -2, 7, 2, 0, 0, 0, 10},
+                                                    {3, 0, 9, 2, 2, 0, 0, 10},
+                                                    {0, 1, -123, 2, 0, -4, 10}};
+  SmallVector<int64_t, 8> denoms = {3, 5, 3};
+
+  // Check if floordivs which may depend on other floordivs can be computed.
+  checkDivisionRepresentation(fac, divisions, denoms);
 }
 
 } // namespace mlir

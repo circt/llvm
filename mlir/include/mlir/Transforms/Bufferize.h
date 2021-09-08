@@ -23,7 +23,7 @@
 #ifndef MLIR_TRANSFORMS_BUFFERIZE_H
 #define MLIR_TRANSFORMS_BUFFERIZE_H
 
-#include "mlir/Analysis/BufferAliasAnalysis.h"
+#include "mlir/Analysis/BufferViewFlowAnalysis.h"
 #include "mlir/Analysis/Liveness.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/Builders.h"
@@ -45,7 +45,7 @@ public:
 /// "legal" in the given ConversionTarget.
 ///
 /// This function should be called by all bufferization passes using
-/// BufferizeTypeConverter so that materializations work proprely. One exception
+/// BufferizeTypeConverter so that materializations work properly. One exception
 /// is bufferization passes doing "full" conversions, where it can be desirable
 /// for even the materializations to remain illegal so that they are eliminated,
 /// such as via the patterns in
@@ -54,10 +54,9 @@ void populateBufferizeMaterializationLegality(ConversionTarget &target);
 
 /// Populate patterns to eliminate bufferize materializations.
 ///
-/// In particular, these are the tensor_load/tensor_to_memref ops.
+/// In particular, these are the tensor_load/buffer_cast ops.
 void populateEliminateBufferizeMaterializationsPatterns(
-    MLIRContext *context, BufferizeTypeConverter &typeConverter,
-    OwningRewritePatternList &patterns);
+    BufferizeTypeConverter &typeConverter, RewritePatternSet &patterns);
 
 } // end namespace mlir
 

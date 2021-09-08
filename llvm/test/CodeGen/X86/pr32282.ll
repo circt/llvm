@@ -4,12 +4,12 @@
 
 ; Check for assert in foldMaskAndShiftToScale due to out of range mask scaling.
 
-@b = common global i8 zeroinitializer, align 1
-@c = common global i8 zeroinitializer, align 1
-@d = common global i64 zeroinitializer, align 8
-@e = common global i64 zeroinitializer, align 8
+@b = common dso_local global i8 zeroinitializer, align 1
+@c = common dso_local global i8 zeroinitializer, align 1
+@d = common dso_local global i64 zeroinitializer, align 8
+@e = common dso_local global i64 zeroinitializer, align 8
 
-define void @foo(i64 %x) nounwind {
+define dso_local void @foo(i64 %x) nounwind {
 ; X86-LABEL: foo:
 ; X86:       # %bb.0:
 ; X86-NEXT:    pushl %eax
@@ -36,7 +36,7 @@ define void @foo(i64 %x) nounwind {
 ; X64-LABEL: foo:
 ; X64:       # %bb.0:
 ; X64-NEXT:    movq %rdi, %rax
-; X64-NEXT:    movq {{.*}}(%rip), %rcx
+; X64-NEXT:    movq d(%rip), %rcx
 ; X64-NEXT:    movabsq $3013716102212485120, %rdx # imm = 0x29D2DED3DE400000
 ; X64-NEXT:    andnq %rdx, %rcx, %rcx
 ; X64-NEXT:    shrq $21, %rcx

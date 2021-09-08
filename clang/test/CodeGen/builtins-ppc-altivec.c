@@ -1,10 +1,16 @@
 // REQUIRES: powerpc-registered-target
 // RUN: %clang_cc1 -target-feature +altivec -triple powerpc-unknown-unknown -emit-llvm %s \
-// RUN:            -flax-vector-conversions=none -o - | FileCheck %s
+// RUN:            -flax-vector-conversions=none  -faltivec-src-compat=mixed \
+// RUN:            -o - | FileCheck %s
+// RUN: %clang_cc1 -target-feature +altivec -triple powerpcle-unknown-unknown -emit-llvm %s \
+// RUN:            -flax-vector-conversions=none  -faltivec-src-compat=mixed \
+// RUN:            -o - | FileCheck %s -check-prefix=CHECK-LE
 // RUN: %clang_cc1 -target-feature +altivec -triple powerpc64-unknown-unknown -emit-llvm %s \
-// RUN:            -flax-vector-conversions=none -o - | FileCheck %s
+// RUN:            -flax-vector-conversions=none  -faltivec-src-compat=mixed \
+// RUN:            -o - | FileCheck %s
 // RUN: %clang_cc1 -target-feature +altivec -triple powerpc64le-unknown-unknown -emit-llvm %s \
-// RUN:            -flax-vector-conversions=none -o - | FileCheck %s -check-prefix=CHECK-LE
+// RUN:            -flax-vector-conversions=none  -faltivec-src-compat=mixed \
+// RUN:            -o - | FileCheck %s -check-prefix=CHECK-LE
 // RUN: not %clang_cc1 -triple powerpc64le-unknown-unknown -emit-llvm %s \
 // RUN:            -ferror-limit 0 -DNO_ALTIVEC -o - 2>&1 \
 // RUN:            | FileCheck %s -check-prefix=CHECK-NOALTIVEC
@@ -63,7 +69,7 @@ int res_i;
 int res_ui;
 int res_f;
 
-// CHECK-LABEL: define void @test1
+// CHECK-LABEL: define{{.*}} void @test1
 void test1() {
 
   /* vec_abs */
@@ -914,7 +920,7 @@ void test1() {
 
 }
 
-// CHECK-LABEL: define void @test2
+// CHECK-LABEL: define{{.*}} void @test2
 void test2() {
   /* vec_avg */
   res_vsc = vec_avg(vsc, vsc);
@@ -1149,7 +1155,7 @@ void test2() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgefp
 }
 
-// CHECK-LABEL: define void @test5
+// CHECK-LABEL: define{{.*}} void @test5
 void test5() {
 
   /* vec_cmpgt */
@@ -1239,7 +1245,7 @@ void test5() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgefp
 }
 
-// CHECK-LABEL: define void @test6
+// CHECK-LABEL: define{{.*}} void @test6
 void test6() {
   /* vec_cmplt */
   res_vbc = vec_cmplt(vsc, vsc);
@@ -3757,6 +3763,18 @@ void test6() {
   // CHECK-LE: sub nsw i32 31
   // CHECK-LE: @llvm.ppc.altivec.vperm
 
+  res_vf = vec_sldw(vf, vf, 0);
+  // CHECK: add nsw i32 {{[0-9a-zA-Z%.]+}}, 1
+  // CHECK: add nsw i32 {{[0-9a-zA-Z%.]+}}, 2
+  // CHECK: add nsw i32 {{[0-9a-zA-Z%.]+}}, 3
+  // CHECK: add nsw i32 {{[0-9a-zA-Z%.]+}}, 15
+  // CHECK: @llvm.ppc.altivec.vperm
+  // CHECK-LE: sub nsw i32 16
+  // CHECK-LE: sub nsw i32 17
+  // CHECK-LE: sub nsw i32 18
+  // CHECK-LE: sub nsw i32 31
+  // CHECK-LE: @llvm.ppc.altivec.vperm
+
   res_vsc = vec_vsldoi(vsc, vsc, 0);
 // CHECK: add nsw i32 {{[0-9a-zA-Z%.]+}}, 1
 // CHECK: add nsw i32 {{[0-9a-zA-Z%.]+}}, 2
@@ -5776,6 +5794,10 @@ void test6() {
 // CHECK: @llvm.ppc.altivec.vupkhpx
 // CHECK-LE: @llvm.ppc.altivec.vupklpx
 
+  res_vui = vec_vupkhpx(vp);
+// CHECK: @llvm.ppc.altivec.vupkhpx
+// CHECK-LE: @llvm.ppc.altivec.vupklpx
+
   res_vs  = vec_vupkhsb(vsc);
 // CHECK: @llvm.ppc.altivec.vupkhsb
 // CHECK-LE: @llvm.ppc.altivec.vupklsb
@@ -5814,6 +5836,10 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vupkhsh
 
   res_vui = vec_unpackl(vp);
+// CHECK: @llvm.ppc.altivec.vupklpx
+// CHECK-LE: @llvm.ppc.altivec.vupkhpx
+
+  res_vui = vec_vupklpx(vp);
 // CHECK: @llvm.ppc.altivec.vupklpx
 // CHECK-LE: @llvm.ppc.altivec.vupkhpx
 
@@ -8075,8 +8101,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtub.p
 
   res_i = vec_all_ge(vbc, vsc);
-// CHECK: @llvm.ppc.altivec.vcmpgtub.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtub.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsb.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsb.p
 
   res_i = vec_all_ge(vbc, vuc);
 // CHECK: @llvm.ppc.altivec.vcmpgtub.p
@@ -8103,8 +8129,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtuh.p
 
   res_i = vec_all_ge(vbs, vs);
-// CHECK: @llvm.ppc.altivec.vcmpgtuh.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtuh.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsh.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsh.p
 
   res_i = vec_all_ge(vbs, vus);
 // CHECK: @llvm.ppc.altivec.vcmpgtuh.p
@@ -8131,8 +8157,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtuw.p
 
   res_i = vec_all_ge(vbi, vi);
-// CHECK: @llvm.ppc.altivec.vcmpgtuw.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtuw.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsw.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsw.p
 
   res_i = vec_all_ge(vbi, vui);
 // CHECK: @llvm.ppc.altivec.vcmpgtuw.p
@@ -8164,8 +8190,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtub.p
 
   res_i = vec_all_gt(vbc, vsc);
-// CHECK: @llvm.ppc.altivec.vcmpgtub.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtub.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsb.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsb.p
 
   res_i = vec_all_gt(vbc, vuc);
 // CHECK: @llvm.ppc.altivec.vcmpgtub.p
@@ -8192,8 +8218,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtuh.p
 
   res_i = vec_all_gt(vbs, vs);
-// CHECK: @llvm.ppc.altivec.vcmpgtuh.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtuh.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsh.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsh.p
 
   res_i = vec_all_gt(vbs, vus);
 // CHECK: @llvm.ppc.altivec.vcmpgtuh.p
@@ -8220,8 +8246,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtuw.p
 
   res_i = vec_all_gt(vbi, vi);
-// CHECK: @llvm.ppc.altivec.vcmpgtuw.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtuw.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsw.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsw.p
 
   res_i = vec_all_gt(vbi, vui);
 // CHECK: @llvm.ppc.altivec.vcmpgtuw.p
@@ -8258,8 +8284,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtub.p
 
   res_i = vec_all_le(vbc, vsc);
-// CHECK: @llvm.ppc.altivec.vcmpgtub.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtub.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsb.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsb.p
 
   res_i = vec_all_le(vbc, vuc);
 // CHECK: @llvm.ppc.altivec.vcmpgtub.p
@@ -8286,8 +8312,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtuh.p
 
   res_i = vec_all_le(vbs, vs);
-// CHECK: @llvm.ppc.altivec.vcmpgtuh.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtuh.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsh.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsh.p
 
   res_i = vec_all_le(vbs, vus);
 // CHECK: @llvm.ppc.altivec.vcmpgtuh.p
@@ -8314,8 +8340,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtuw.p
 
   res_i = vec_all_le(vbi, vi);
-// CHECK: @llvm.ppc.altivec.vcmpgtuw.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtuw.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsw.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsw.p
 
   res_i = vec_all_le(vbi, vui);
 // CHECK: @llvm.ppc.altivec.vcmpgtuw.p
@@ -8347,8 +8373,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtub.p
 
   res_i = vec_all_lt(vbc, vsc);
-// CHECK: @llvm.ppc.altivec.vcmpgtub.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtub.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsb.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsb.p
 
   res_i = vec_all_lt(vbc, vuc);
 // CHECK: @llvm.ppc.altivec.vcmpgtub.p
@@ -8375,8 +8401,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtuh.p
 
   res_i = vec_all_lt(vbs, vs);
-// CHECK: @llvm.ppc.altivec.vcmpgtuh.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtuh.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsh.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsh.p
 
   res_i = vec_all_lt(vbs, vus);
 // CHECK: @llvm.ppc.altivec.vcmpgtuh.p
@@ -8403,8 +8429,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtuw.p
 
   res_i = vec_all_lt(vbi, vi);
-// CHECK: @llvm.ppc.altivec.vcmpgtuw.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtuw.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsw.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsw.p
 
   res_i = vec_all_lt(vbi, vui);
 // CHECK: @llvm.ppc.altivec.vcmpgtuw.p
@@ -8652,8 +8678,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtub.p
 
   res_i = vec_any_ge(vbc, vsc);
-// CHECK: @llvm.ppc.altivec.vcmpgtub.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtub.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsb.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsb.p
 
   res_i = vec_any_ge(vbc, vuc);
 // CHECK: @llvm.ppc.altivec.vcmpgtub.p
@@ -8680,8 +8706,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtuh.p
 
   res_i = vec_any_ge(vbs, vs);
-// CHECK: @llvm.ppc.altivec.vcmpgtuh.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtuh.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsh.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsh.p
 
   res_i = vec_any_ge(vbs, vus);
 // CHECK: @llvm.ppc.altivec.vcmpgtuh.p
@@ -8708,8 +8734,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtuw.p
 
   res_i = vec_any_ge(vbi, vi);
-// CHECK: @llvm.ppc.altivec.vcmpgtuw.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtuw.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsw.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsw.p
 
   res_i = vec_any_ge(vbi, vui);
 // CHECK: @llvm.ppc.altivec.vcmpgtuw.p
@@ -8741,8 +8767,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtub.p
 
   res_i = vec_any_gt(vbc, vsc);
-// CHECK: @llvm.ppc.altivec.vcmpgtub.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtub.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsb.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsb.p
 
   res_i = vec_any_gt(vbc, vuc);
 // CHECK: @llvm.ppc.altivec.vcmpgtub.p
@@ -8769,8 +8795,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtuh.p
 
   res_i = vec_any_gt(vbs, vs);
-// CHECK: @llvm.ppc.altivec.vcmpgtuh.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtuh.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsh.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsh.p
 
   res_i = vec_any_gt(vbs, vus);
 // CHECK: @llvm.ppc.altivec.vcmpgtuh.p
@@ -8797,8 +8823,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtuw.p
 
   res_i = vec_any_gt(vbi, vi);
-// CHECK: @llvm.ppc.altivec.vcmpgtuw.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtuw.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsw.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsw.p
 
   res_i = vec_any_gt(vbi, vui);
 // CHECK: @llvm.ppc.altivec.vcmpgtuw.p
@@ -8830,8 +8856,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtub.p
 
   res_i = vec_any_le(vbc, vsc);
-// CHECK: @llvm.ppc.altivec.vcmpgtub.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtub.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsb.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsb.p
 
   res_i = vec_any_le(vbc, vuc);
 // CHECK: @llvm.ppc.altivec.vcmpgtub.p
@@ -8858,8 +8884,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtuh.p
 
   res_i = vec_any_le(vbs, vs);
-// CHECK: @llvm.ppc.altivec.vcmpgtuh.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtuh.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsh.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsh.p
 
   res_i = vec_any_le(vbs, vus);
 // CHECK: @llvm.ppc.altivec.vcmpgtuh.p
@@ -8886,8 +8912,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtuw.p
 
   res_i = vec_any_le(vbi, vi);
-// CHECK: @llvm.ppc.altivec.vcmpgtuw.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtuw.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsw.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsw.p
 
   res_i = vec_any_le(vbi, vui);
 // CHECK: @llvm.ppc.altivec.vcmpgtuw.p
@@ -8919,8 +8945,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtub.p
 
   res_i = vec_any_lt(vbc, vsc);
-// CHECK: @llvm.ppc.altivec.vcmpgtub.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtub.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsb.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsb.p
 
   res_i = vec_any_lt(vbc, vuc);
 // CHECK: @llvm.ppc.altivec.vcmpgtub.p
@@ -8947,8 +8973,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtuh.p
 
   res_i = vec_any_lt(vbs, vs);
-// CHECK: @llvm.ppc.altivec.vcmpgtuh.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtuh.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsh.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsh.p
 
   res_i = vec_any_lt(vbs, vus);
 // CHECK: @llvm.ppc.altivec.vcmpgtuh.p
@@ -8975,8 +9001,8 @@ void test6() {
 // CHECK-LE: @llvm.ppc.altivec.vcmpgtuw.p
 
   res_i = vec_any_lt(vbi, vi);
-// CHECK: @llvm.ppc.altivec.vcmpgtuw.p
-// CHECK-LE: @llvm.ppc.altivec.vcmpgtuw.p
+// CHECK: @llvm.ppc.altivec.vcmpgtsw.p
+// CHECK-LE: @llvm.ppc.altivec.vcmpgtsw.p
 
   res_i = vec_any_lt(vbi, vui);
 // CHECK: @llvm.ppc.altivec.vcmpgtuw.p
@@ -9120,7 +9146,7 @@ void test6() {
 }
 
 /* ------------------------------ Relational Operators ------------------------------ */
-// CHECK-LABEL: define void @test7
+// CHECK-LABEL: define{{.*}} void @test7
 void test7() {
   vector signed char vsc1 = (vector signed char)(-1);
   vector signed char vsc2 = (vector signed char)(-2);
@@ -9307,8 +9333,8 @@ void test7() {
 
 /* ------------------------------ optional ---------------------------------- */
 void test8() {
-// CHECK-LABEL: define void @test8
-// CHECK-LE-LABEL: define void @test8
+// CHECK-LABEL: define{{.*}} void @test8
+// CHECK-LE-LABEL: define{{.*}} void @test8
   res_vbc = vec_reve(vbc);
   // CHECK: shufflevector <16 x i8> %{{[0-9]+}}, <16 x i8> %{{[0-9]+}}, <16 x i32> <i32 15, i32 14, i32 13, i32 12, i32 11, i32 10, i32 9, i32 8, i32 7, i32 6, i32 5, i32 4, i32 3, i32 2, i32 1, i32 0>
   // CHECK-LE: shufflevector <16 x i8> %{{[0-9]+}}, <16 x i8> %{{[0-9]+}}, <16 x i32> <i32 15, i32 14, i32 13, i32 12, i32 11, i32 10, i32 9, i32 8, i32 7, i32 6, i32 5, i32 4, i32 3, i32 2, i32 1, i32 0>
@@ -9438,8 +9464,8 @@ void test8() {
 
 /* ------------------------------ vec_xl ------------------------------------ */
 void test9() {
-  // CHECK-LABEL: define void @test9
-  // CHECK-LE-LABEL: define void @test9
+  // CHECK-LABEL: define{{.*}} void @test9
+  // CHECK-LE-LABEL: define{{.*}} void @test9
   res_vsc = vec_xl(param_sll, param_sc_ld);
   // CHECK: load <16 x i8>, <16 x i8>* %{{[0-9]+}}, align 1
   // CHECK-LE: load <16 x i8>, <16 x i8>* %{{[0-9]+}}, align 1
@@ -9471,8 +9497,8 @@ void test9() {
 
 /* ------------------------------ vec_xst ----------------------------------- */
 void test10() {
-  // CHECK-LABEL: define void @test10
-  // CHECK-LE-LABEL: define void @test10
+  // CHECK-LABEL: define{{.*}} void @test10
+  // CHECK-LE-LABEL: define{{.*}} void @test10
   vec_xst(vsc, param_sll, &param_sc);
   // CHECK: store <16 x i8> %{{[0-9]+}}, <16 x i8>* %{{[0-9]+}}, align 1
   // CHECK-LE: store <16 x i8> %{{[0-9]+}}, <16 x i8>* %{{[0-9]+}}, align 1
@@ -9504,8 +9530,8 @@ void test10() {
 
 /* ----------------------------- vec_xl_be ---------------------------------- */
 void test11() {
-  // CHECK-LABEL: define void @test11
-  // CHECK-LE-LABEL: define void @test11
+  // CHECK-LABEL: define{{.*}} void @test11
+  // CHECK-LE-LABEL: define{{.*}} void @test11
   res_vsc = vec_xl_be(param_sll, param_sc_ld);
   // CHECK: load <16 x i8>, <16 x i8>* %{{[0-9]+}}, align 1
   // CHECK-LE: call <2 x double> @llvm.ppc.vsx.lxvd2x.be(i8* %{{[0-9]+}})
@@ -9541,8 +9567,8 @@ void test11() {
 
 /* ----------------------------- vec_xst_be --------------------------------- */
 void test12() {
-  // CHECK-LABEL: define void @test12
-  // CHECK-LE-LABEL: define void @test12
+  // CHECK-LABEL: define{{.*}} void @test12
+  // CHECK-LE-LABEL: define{{.*}} void @test12
   vec_xst_be(vsc, param_sll, &param_sc);
   // CHECK: store <16 x i8> %{{[0-9]+}}, <16 x i8>* %{{[0-9]+}}, align 1
   // CHECK-LE: shufflevector <16 x i8> %{{[0-9]+}}, <16 x i8> %{{[0-9]+}}, <16 x i32> <i32 7, i32 6, i32 5, i32 4, i32 3, i32 2, i32 1, i32 0, i32 15, i32 14, i32 13, i32 12, i32 11, i32 10, i32 9, i32 8>
@@ -9574,4 +9600,22 @@ void test12() {
   vec_xst_be(vf, param_sll, &param_f);
   // CHECK: store <4 x float> %{{[0-9]+}}, <4 x float>* %{{[0-9]+}}, align 1
   // CHECK-LE: call void @llvm.ppc.vsx.stxvw4x.be(<4 x i32> %{{[0-9]+}}, i8* %{{[0-9]+}})
+}
+
+vector float test_rsqrtf(vector float a, vector float b) {
+  // CHECK-LABEL: test_rsqrtf
+  // CHECK: call fast <4 x float> @llvm.sqrt.v4f32
+  // CHECK: fdiv fast <4 x float> <float 1.000000e+00, float 1.000000e+00, float 1.000000e+00, float 1.000000e+00>
+  // CHECK-LE-LABEL: test_rsqrtf
+  // CHECK-LE: call fast <4 x float> @llvm.sqrt.v4f32
+  // CHECK-LE: fdiv fast <4 x float> <float 1.000000e+00, float 1.000000e+00, float 1.000000e+00, float 1.000000e+00>
+  return vec_rsqrt(a);
+}
+
+vector float test_recipdivf(vector float a, vector float b) {
+  // CHECK-LABEL: test_recipdivf
+  // CHECK: fdiv fast <4 x float>
+  // CHECK-LE-LABEL: test_recipdivf
+  // CHECK-LE: fdiv fast <4 x float>
+  return vec_recipdiv(a, b);
 }

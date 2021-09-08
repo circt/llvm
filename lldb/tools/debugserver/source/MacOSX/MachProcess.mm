@@ -140,8 +140,10 @@ static bool CallBoardSystemServiceOpenApplication(NSString *bundleIDNSStr,
     cstr = "<Unknown Bundle ID>";
 
   NSString *description = [options description];
-  DNBLog("About to launch process for bundle ID: %s - options:\n%s", cstr,
-    [description UTF8String]);
+  DNBLog("[LaunchAttach] START (%d) templated *Board launcher: app lunch "
+         "request for "
+         "'%s' - options:\n%s",
+         getpid(), cstr, [description UTF8String]);
   [system_service
       openApplication:bundleIDNSStr
               options:options
@@ -156,33 +158,36 @@ static bool CallBoardSystemServiceOpenApplication(NSString *bundleIDNSStr,
                if (wants_pid) {
                  pid_in_block =
                      [system_service pidForApplication:bundleIDNSStr];
-                 DNBLog(
-                     "In completion handler, got pid for bundle id, pid: %d.",
-                     pid_in_block);
-                 DNBLogThreadedIf(
-                     LOG_PROCESS,
-                     "In completion handler, got pid for bundle id, pid: %d.",
-                     pid_in_block);
-               } else
-                 DNBLogThreadedIf(LOG_PROCESS,
-                                  "In completion handler: success.");
+                 DNBLog("[LaunchAttach] In completion handler, got pid for "
+                        "bundle id "
+                        "'%s', pid: %d.",
+                        cstr, pid_in_block);
+               } else {
+                 DNBLog("[LaunchAttach] In completion handler, launch was "
+                        "successful, "
+                        "debugserver did not ask for the pid");
+               }
              } else {
                const char *error_str =
                    [(NSString *)[bks_error localizedDescription] UTF8String];
                if (error_str) {
                  open_app_error_string = error_str;
-                 DNBLogError("In app launch attempt, got error "
-                             "localizedDescription '%s'.", error_str);
+                 DNBLogError(
+                     "[LaunchAttach] END (%d) In app launch attempt, got error "
+                     "localizedDescription '%s'.",
+                     getpid(), error_str);
                  const char *obj_desc = 
                       [NSString stringWithFormat:@"%@", bks_error].UTF8String;
-                 DNBLogError("In app launch attempt, got error "
-                             "NSError object description: '%s'.",
-                             obj_desc);
+                 DNBLogError(
+                     "[LaunchAttach] END (%d) In app launch attempt, got error "
+                     "NSError object description: '%s'.",
+                     getpid(), obj_desc);
                }
-               DNBLogThreadedIf(LOG_PROCESS, "In completion handler for send "
-                                             "event, got error \"%s\"(%ld).",
+               DNBLogThreadedIf(LOG_PROCESS,
+                                "In completion handler for send "
+                                "event, got error \"%s\"(%ld).",
                                 error_str ? error_str : "<unknown error>",
-                                open_app_error);
+                                (long)open_app_error);
              }
 
              [system_service release];
@@ -200,15 +205,23 @@ static bool CallBoardSystemServiceOpenApplication(NSString *bundleIDNSStr,
 
   dispatch_release(semaphore);
 
+  DNBLog("[LaunchAttach] END (%d) templated *Board launcher finished app lunch "
+         "request for "
+         "'%s'",
+         getpid(), cstr);
+
   if (!success) {
-    DNBLogError("timed out trying to send openApplication to %s.", cstr);
+    DNBLogError("[LaunchAttach] END (%d) timed out trying to send "
+                "openApplication to %s.",
+                getpid(), cstr);
     error.SetError(OPEN_APPLICATION_TIMEOUT_ERROR, DNBError::Generic);
     error.SetErrorString("timed out trying to launch app");
   } else if (open_app_error != no_error_enum_value) {
     error_function(open_app_error, open_app_error_string, error);
-    DNBLogError("unable to launch the application with CFBundleIdentifier '%s' "
-                "bks_error = %u",
-                cstr, open_app_error);
+    DNBLogError("[LaunchAttach] END (%d) unable to launch the application with "
+                "CFBundleIdentifier '%s' "
+                "bks_error = %ld",
+                getpid(), cstr, (long)open_app_error);
     success = false;
   } else if (wants_pid) {
     *return_pid = pid_in_block;
@@ -688,7 +701,7 @@ MachProcess::GetDeploymentInfo(const struct load_command &lc,
   // DYLD_FORCE_PLATFORM=6. In that case, force the platform to
   // macCatalyst and use the macCatalyst version of the host OS
   // instead of the macOS deployment target.
-  if (is_executable && GetProcessPlatformViaDYLDSPI() == PLATFORM_MACCATALYST) {
+  if (is_executable && GetPlatform() == PLATFORM_MACCATALYST) {
     info.platform = PLATFORM_MACCATALYST;
     std::string catalyst_version = GetMacCatalystVersionString();
     const char *major = catalyst_version.c_str();
@@ -974,23 +987,15 @@ JSONGenerator::ObjectSP MachProcess::GetLoadedDynamicLibrariesInfos(
     nub_process_t pid, nub_addr_t image_list_address, nub_addr_t image_count) {
   JSONGenerator::DictionarySP reply_sp;
 
-  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
-  struct kinfo_proc processInfo;
-  size_t bufsize = sizeof(processInfo);
-  if (sysctl(mib, (unsigned)(sizeof(mib) / sizeof(int)), &processInfo, &bufsize,
-             NULL, 0) == 0 &&
-      bufsize > 0) {
-    uint32_t pointer_size = 4;
-    if (processInfo.kp_proc.p_flag & P_LP64)
-      pointer_size = 8;
+  int pointer_size = GetInferiorAddrSize(pid);
 
-    std::vector<struct binary_image_information> image_infos;
-    size_t image_infos_size = image_count * 3 * pointer_size;
+  std::vector<struct binary_image_information> image_infos;
+  size_t image_infos_size = image_count * 3 * pointer_size;
 
-    uint8_t *image_info_buf = (uint8_t *)malloc(image_infos_size);
-    if (image_info_buf == NULL) {
-      return reply_sp;
-    }
+  uint8_t *image_info_buf = (uint8_t *)malloc(image_infos_size);
+  if (image_info_buf == NULL) {
+    return reply_sp;
+  }
     if (ReadMemory(image_list_address, image_infos_size, image_info_buf) !=
         image_infos_size) {
       return reply_sp;
@@ -1072,7 +1077,6 @@ JSONGenerator::ObjectSP MachProcess::GetLoadedDynamicLibrariesInfos(
     ////  Third, format all of the above in the JSONGenerator object.
 
     return FormatDynamicLibrariesIntoJSON(image_infos);
-  }
 
   return reply_sp;
 }
@@ -1089,6 +1093,12 @@ struct dyld_process_cache_info {
   /// Process is using a private copy of its dyld cache.
   bool privateCache;
 };
+
+uint32_t MachProcess::GetPlatform() {
+  if (m_platform == 0)
+    m_platform = MachProcess::GetProcessPlatformViaDYLDSPI();
+  return m_platform;
+}
 
 uint32_t MachProcess::GetProcessPlatformViaDYLDSPI() {
   kern_return_t kern_ret;
@@ -1133,28 +1143,16 @@ JSONGenerator::ObjectSP
 MachProcess::GetAllLoadedLibrariesInfos(nub_process_t pid) {
   JSONGenerator::DictionarySP reply_sp;
 
-  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
-  struct kinfo_proc processInfo;
-  size_t bufsize = sizeof(processInfo);
-  if (sysctl(mib, (unsigned)(sizeof(mib) / sizeof(int)), &processInfo, &bufsize,
-             NULL, 0) == 0 &&
-      bufsize > 0) {
-    uint32_t pointer_size = 4;
-    if (processInfo.kp_proc.p_flag & P_LP64)
-      pointer_size = 8;
-
-    std::vector<struct binary_image_information> image_infos;
-    GetAllLoadedBinariesViaDYLDSPI(image_infos);
-    uint32_t platform = GetProcessPlatformViaDYLDSPI();
-    const size_t image_count = image_infos.size();
-    for (size_t i = 0; i < image_count; i++) {
-      GetMachOInformationFromMemory(platform,
-                                    image_infos[i].load_address, pointer_size,
-                                    image_infos[i].macho_info);
-    }
-    return FormatDynamicLibrariesIntoJSON(image_infos);
+  int pointer_size = GetInferiorAddrSize(pid);
+  std::vector<struct binary_image_information> image_infos;
+  GetAllLoadedBinariesViaDYLDSPI(image_infos);
+  uint32_t platform = GetPlatform();
+  const size_t image_count = image_infos.size();
+  for (size_t i = 0; i < image_count; i++) {
+    GetMachOInformationFromMemory(platform, image_infos[i].load_address,
+                                  pointer_size, image_infos[i].macho_info);
   }
-  return reply_sp;
+    return FormatDynamicLibrariesIntoJSON(image_infos);
 }
 
 // Fetch information about the shared libraries at the given load addresses
@@ -1164,30 +1162,22 @@ JSONGenerator::ObjectSP MachProcess::GetLibrariesInfoForAddresses(
     nub_process_t pid, std::vector<uint64_t> &macho_addresses) {
   JSONGenerator::DictionarySP reply_sp;
 
-  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
-  struct kinfo_proc processInfo;
-  size_t bufsize = sizeof(processInfo);
-  if (sysctl(mib, (unsigned)(sizeof(mib) / sizeof(int)), &processInfo, &bufsize,
-             NULL, 0) == 0 &&
-      bufsize > 0) {
-    uint32_t pointer_size = 4;
-    if (processInfo.kp_proc.p_flag & P_LP64)
-      pointer_size = 8;
+  int pointer_size = GetInferiorAddrSize(pid);
 
-    std::vector<struct binary_image_information> all_image_infos;
-    GetAllLoadedBinariesViaDYLDSPI(all_image_infos);
-    uint32_t platform = GetProcessPlatformViaDYLDSPI();
+  std::vector<struct binary_image_information> all_image_infos;
+  GetAllLoadedBinariesViaDYLDSPI(all_image_infos);
+  uint32_t platform = GetPlatform();
 
-    std::vector<struct binary_image_information> image_infos;
-    const size_t macho_addresses_count = macho_addresses.size();
-    const size_t all_image_infos_count = all_image_infos.size();
-    for (size_t i = 0; i < macho_addresses_count; i++) {
-      for (size_t j = 0; j < all_image_infos_count; j++) {
-        if (all_image_infos[j].load_address == macho_addresses[i]) {
-          image_infos.push_back(all_image_infos[j]);
-        }
+  std::vector<struct binary_image_information> image_infos;
+  const size_t macho_addresses_count = macho_addresses.size();
+  const size_t all_image_infos_count = all_image_infos.size();
+  for (size_t i = 0; i < macho_addresses_count; i++) {
+    for (size_t j = 0; j < all_image_infos_count; j++) {
+      if (all_image_infos[j].load_address == macho_addresses[i]) {
+        image_infos.push_back(all_image_infos[j]);
       }
     }
+  }
 
     const size_t image_infos_count = image_infos.size();
     for (size_t i = 0; i < image_infos_count; i++) {
@@ -1196,8 +1186,6 @@ JSONGenerator::ObjectSP MachProcess::GetLibrariesInfoForAddresses(
                                     image_infos[i].macho_info);
     }
     return FormatDynamicLibrariesIntoJSON(image_infos);
-  }
-  return reply_sp;
 }
 
 // From dyld's internal podyld_process_info.h:
@@ -1342,6 +1330,7 @@ void MachProcess::Clear(bool detaching) {
   // Clear any cached thread list while the pid and task are still valid
 
   m_task.Clear();
+  m_platform = 0;
   // Now clear out all member variables
   m_pid = INVALID_NUB_PROCESS;
   if (!detaching)
@@ -1428,7 +1417,7 @@ bool MachProcess::Kill(const struct timespec *timeout_abstime) {
   DNBLogThreadedIf(LOG_PROCESS, "MachProcess::Kill() DoSIGSTOP() state = %s",
                    DNBStateAsString(state));
   errno = 0;
-  DNBLog("Sending ptrace PT_KILL to terminate inferior process.");
+  DNBLog("Sending ptrace PT_KILL to terminate inferior process pid %d.", m_pid);
   ::ptrace(PT_KILL, m_pid, 0, 0);
   DNBError err;
   err.SetErrorToErrno();
@@ -1633,6 +1622,7 @@ bool MachProcess::Detach() {
 
   // NULL our task out as we have already restored all exception ports
   m_task.Clear();
+  m_platform = 0;
 
   // Clear out any notion of the process we once were
   const bool detaching = true;
@@ -2623,15 +2613,26 @@ pid_t MachProcess::AttachForDebug(pid_t pid, bool unmask_signals, char *err_str,
       ::snprintf(err_str, err_len, "%s",
                  err_cstr ? err_cstr : "unable to start the exception thread");
       DNBLogThreadedIf(LOG_PROCESS, "error: failed to attach to pid %d", pid);
-      DNBLogError ("MachProcess::AttachForDebug failed to start exception thread: %s", err_str);
+      DNBLogError(
+          "[LaunchAttach] END (%d) MachProcess::AttachForDebug failed to start "
+          "exception thread attaching to pid %i: %s",
+          getpid(), pid, err_str);
       m_pid = INVALID_NUB_PROCESS;
       return INVALID_NUB_PROCESS;
     }
 
+    DNBLog("[LaunchAttach] (%d) About to ptrace(PT_ATTACHEXC, %d)...", getpid(),
+           pid);
     errno = 0;
-    if (::ptrace(PT_ATTACHEXC, pid, 0, 0)) {
-      err.SetError(errno);
-      DNBLogError ("MachProcess::AttachForDebug failed to ptrace(PT_ATTACHEXC): %s", err.AsString());
+    int ptrace_result = ::ptrace(PT_ATTACHEXC, pid, 0, 0);
+    int ptrace_errno = errno;
+    DNBLog("[LaunchAttach] (%d) Completed ptrace(PT_ATTACHEXC, %d) == %d",
+           getpid(), pid, ptrace_result);
+    if (ptrace_result != 0) {
+      err.SetError(ptrace_errno);
+      DNBLogError("MachProcess::AttachForDebug failed to ptrace(PT_ATTACHEXC) "
+                  "pid %i: %s",
+                  pid, err.AsString());
     } else {
       err.Clear();
     }
@@ -2642,11 +2643,16 @@ pid_t MachProcess::AttachForDebug(pid_t pid, bool unmask_signals, char *err_str,
       // status
       // to stopped.
       ::usleep(250000);
+      DNBLog("[LaunchAttach] (%d) Done napping after ptrace(PT_ATTACHEXC)'ing",
+             getpid());
       DNBLogThreadedIf(LOG_PROCESS, "successfully attached to pid %d", pid);
       return m_pid;
     } else {
       ::snprintf(err_str, err_len, "%s", err.AsString());
-      DNBLogError ("MachProcess::AttachForDebug error: failed to attach to pid %d", pid);
+      DNBLogError(
+          "[LaunchAttach] (%d) MachProcess::AttachForDebug error: failed to "
+          "attach to pid %d",
+          getpid(), pid);
 
       struct kinfo_proc kinfo;
       int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
@@ -2654,7 +2660,10 @@ pid_t MachProcess::AttachForDebug(pid_t pid, bool unmask_signals, char *err_str,
       if (sysctl(mib, sizeof(mib) / sizeof(mib[0]), &kinfo, &len, NULL, 0) == 0 && len > 0) {
         if (kinfo.kp_proc.p_flag & P_TRACED) {
           ::snprintf(err_str, err_len, "%s - process %d is already being debugged", err.AsString(), pid);
-          DNBLogError ("MachProcess::AttachForDebug pid %d is already being debugged", pid);
+          DNBLogError(
+              "[LaunchAttach] (%d) MachProcess::AttachForDebug pid %d is "
+              "already being debugged",
+              getpid(), pid);
         }
       }
     }
@@ -2675,10 +2684,6 @@ MachProcess::GetGenealogyImageInfo(size_t idx) {
 
 bool MachProcess::GetOSVersionNumbers(uint64_t *major, uint64_t *minor,
                                       uint64_t *patch) {
-#if defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) &&                  \
-    (__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ < 101000)
-  return false;
-#else
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
 
   NSOperatingSystemVersion vers =
@@ -2693,7 +2698,6 @@ bool MachProcess::GetOSVersionNumbers(uint64_t *major, uint64_t *minor,
   [pool drain];
 
   return true;
-#endif
 }
 
 std::string MachProcess::GetMacCatalystVersionString() {
@@ -2707,6 +2711,30 @@ std::string MachProcess::GetMacCatalystVersionString() {
   }
   return {};
 }
+
+#if defined(WITH_SPRINGBOARD) || defined(WITH_BKS) || defined(WITH_FBS)
+/// Get the app bundle from the given path. Returns the empty string if the
+/// path doesn't appear to be an app bundle.
+static std::string GetAppBundle(std::string path) {
+  auto pos = path.rfind(".app");
+  // Path doesn't contain `.app`.
+  if (pos == std::string::npos)
+    return {};
+  // Path has `.app` extension.
+  if (pos == path.size() - 4)
+    return path.substr(0, pos + 4);
+
+  // Look for `.app` before a path separator.
+  do {
+    if (path[pos + 4] == '/')
+      return path.substr(0, pos + 4);
+    path = path.substr(0, pos);
+    pos = path.rfind(".app");
+  } while (pos != std::string::npos);
+
+  return {};
+}
+#endif
 
 // Do the process specific setup for attach.  If this returns NULL, then there's
 // no
@@ -2731,10 +2759,8 @@ const void *MachProcess::PrepareForAttach(const char *path,
   if (!waitfor)
     return NULL;
 
-  const char *app_ext = strstr(path, ".app");
-  const bool is_app =
-      app_ext != NULL && (app_ext[4] == '\0' || app_ext[4] == '/');
-  if (!is_app) {
+  std::string app_bundle_path = GetAppBundle(path);
+  if (app_bundle_path.empty()) {
     DNBLogThreadedIf(
         LOG_PROCESS,
         "MachProcess::PrepareForAttach(): path '%s' doesn't contain .app, "
@@ -2759,8 +2785,6 @@ const void *MachProcess::PrepareForAttach(const char *path,
   if (launch_flavor != eLaunchFlavorSpringBoard)
     return NULL;
 #endif
-
-  std::string app_bundle_path(path, app_ext + strlen(".app"));
 
   CFStringRef bundleIDCFStr =
       CopyBundleIDForPath(app_bundle_path.c_str(), attach_err);
@@ -2815,6 +2839,9 @@ const void *MachProcess::PrepareForAttach(const char *path,
 
     NSString *bundleIDNSStr = (NSString *)bundleIDCFStr;
 
+    DNBLog("[LaunchAttach] START (%d) requesting FBS launch of app with bundle "
+           "ID '%s'",
+           getpid(), bundleIDStr.c_str());
     [system_service openApplication:bundleIDNSStr
                             options:options
                          clientPort:client_port
@@ -2893,6 +2920,9 @@ const void *MachProcess::PrepareForAttach(const char *path,
 
     NSString *bundleIDNSStr = (NSString *)bundleIDCFStr;
 
+    DNBLog("[LaunchAttach] START (%d) requesting BKS launch of app with bundle "
+           "ID '%s'",
+           getpid(), bundleIDStr.c_str());
     [system_service openApplication:bundleIDNSStr
                             options:options
                          clientPort:client_port
@@ -2923,7 +2953,7 @@ const void *MachProcess::PrepareForAttach(const char *path,
       std::string empty_str;
       SetBKSError(attach_error_code, empty_str, attach_err);
       DNBLogError("unable to launch the application with CFBundleIdentifier "
-                  "'%s' bks_error = %ld",
+                  "'%s' bks_error = %d",
                   bundleIDStr.c_str(), attach_error_code);
     }
     dispatch_release(semaphore);
@@ -2945,6 +2975,10 @@ const void *MachProcess::PrepareForAttach(const char *path,
                                   "SBSApplicationLaunchWaitForDebugger )",
                      bundleIDStr.c_str(), stdout_err, stdout_err);
 
+    DNBLog("[LaunchAttach] START (%d) requesting SpringBoard launch of app "
+           "with bundle "
+           "ID '%s'",
+           getpid(), bundleIDStr.c_str());
     sbs_error = SBSLaunchApplicationForDebugging(
         bundleIDCFStr,
         (CFURLRef)NULL, // openURL
@@ -3099,61 +3133,42 @@ pid_t MachProcess::LaunchForDebug(
     break;
 #ifdef WITH_FBS
   case eLaunchFlavorFBS: {
-    const char *app_ext = strstr(path, ".app");
-    if (app_ext && (app_ext[4] == '\0' || app_ext[4] == '/')) {
-      std::string app_bundle_path(path, app_ext + strlen(".app"));
+    std::string app_bundle_path = GetAppBundle(path);
+    if (!app_bundle_path.empty()) {
       m_flags |= (eMachProcessFlagsUsingFBS | eMachProcessFlagsBoardCalculated);
       if (BoardServiceLaunchForDebug(app_bundle_path.c_str(), argv, envp,
                                      no_stdio, disable_aslr, event_data,
-                                     launch_err) != 0)
+                                     unmask_signals, launch_err) != 0)
         return m_pid; // A successful SBLaunchForDebug() returns and assigns a
                       // non-zero m_pid.
-      else
-        break; // We tried a FBS launch, but didn't succeed lets get out
     }
+    DNBLog("Failed to launch '%s' with FBS", app_bundle_path);
   } break;
 #endif
 #ifdef WITH_BKS
   case eLaunchFlavorBKS: {
-    const char *app_ext = strstr(path, ".app");
-    if (app_ext && (app_ext[4] == '\0' || app_ext[4] == '/')) {
-      std::string app_bundle_path(path, app_ext + strlen(".app"));
+    std::string app_bundle_path = GetAppBundle(path);
+    if (!app_bundle_path.empty()) {
       m_flags |= (eMachProcessFlagsUsingBKS | eMachProcessFlagsBoardCalculated);
       if (BoardServiceLaunchForDebug(app_bundle_path.c_str(), argv, envp,
                                      no_stdio, disable_aslr, event_data,
-                                     launch_err) != 0)
+                                     unmask_signals, launch_err) != 0)
         return m_pid; // A successful SBLaunchForDebug() returns and assigns a
                       // non-zero m_pid.
-      else
-        break; // We tried a BKS launch, but didn't succeed lets get out
     }
+    DNBLog("Failed to launch '%s' with BKS", app_bundle_path);
   } break;
 #endif
 #ifdef WITH_SPRINGBOARD
-
   case eLaunchFlavorSpringBoard: {
-    //  .../whatever.app/whatever ?
-    //  Or .../com.apple.whatever.app/whatever -- be careful of ".app" in
-    //  "com.apple.whatever" here
-    const char *app_ext = strstr(path, ".app/");
-    if (app_ext == NULL) {
-      // .../whatever.app ?
-      int len = strlen(path);
-      if (len > 5) {
-        if (strcmp(path + len - 4, ".app") == 0) {
-          app_ext = path + len - 4;
-        }
-      }
-    }
-    if (app_ext) {
-      std::string app_bundle_path(path, app_ext + strlen(".app"));
+    std::string app_bundle_path = GetAppBundle(path);
+    if (!app_bundle_path.empty()) {
       if (SBLaunchForDebug(app_bundle_path.c_str(), argv, envp, no_stdio,
-                           disable_aslr, launch_err) != 0)
+                           disable_aslr, unmask_signals, launch_err) != 0)
         return m_pid; // A successful SBLaunchForDebug() returns and assigns a
                       // non-zero m_pid.
-      else
-        break; // We tried a springboard launch, but didn't succeed lets get out
     }
+    DNBLog("Failed to launch '%s' with SpringBoard", app_bundle_path);
   } break;
 
 #endif
@@ -3166,7 +3181,7 @@ pid_t MachProcess::LaunchForDebug(
     break;
 
   default:
-    // Invalid  launch
+    DNBLog("Failed to launch: invalid launch flavor: %d", launch_flavor);
     launch_err.SetError(NUB_GENERIC_ERROR, DNBError::Generic);
     return INVALID_NUB_PROCESS;
   }
@@ -3200,14 +3215,19 @@ pid_t MachProcess::LaunchForDebug(
 
       SetState(eStateAttaching);
       errno = 0;
+      DNBLog("[LaunchAttach] (%d) About to ptrace(PT_ATTACHEXC, %d)...",
+             getpid(), m_pid);
       int err = ::ptrace(PT_ATTACHEXC, m_pid, 0, 0);
+      int ptrace_errno = errno;
+      DNBLog("[LaunchAttach] (%d) Completed ptrace(PT_ATTACHEXC, %d) == %d",
+             getpid(), m_pid, err);
       if (err == 0) {
         m_flags |= eMachProcessFlagsAttached;
         DNBLogThreadedIf(LOG_PROCESS, "successfully spawned pid %d", m_pid);
         launch_err.Clear();
       } else {
         SetState(eStateExited);
-        DNBError ptrace_err(errno, DNBError::POSIX);
+        DNBError ptrace_err(ptrace_errno, DNBError::POSIX);
         DNBLogThreadedIf(LOG_PROCESS, "error: failed to attach to spawned pid "
                                       "%d (err = %i, errno = %i (%s))",
                          m_pid, err, ptrace_err.Status(),
@@ -3577,7 +3597,11 @@ pid_t MachProcess::SBLaunchForDebug(const char *path, char const *argv[],
 
     StartSTDIOThread();
     SetState(eStateAttaching);
+    DNBLog("[LaunchAttach] (%d) About to ptrace(PT_ATTACHEXC, %d)...", getpid(),
+           m_pid);
     int err = ::ptrace(PT_ATTACHEXC, m_pid, 0, 0);
+    DNBLog("[LaunchAttach] (%d) Completed ptrace(PT_ATTACHEXC, %d) == %d",
+           getpid(), m_pid, err);
     if (err == 0) {
       m_flags |= eMachProcessFlagsAttached;
       DNBLogThreadedIf(LOG_PROCESS, "successfully attached to pid %d", m_pid);
@@ -3779,8 +3803,11 @@ pid_t MachProcess::BoardServiceLaunchForDebug(
     if (launch_err.Fail()) {
       if (launch_err.AsString() == NULL)
         launch_err.SetErrorString("unable to start the exception thread");
-      DNBLog("Could not get inferior's Mach exception port, sending ptrace "
-             "PT_KILL and exiting.");
+      DNBLog("[LaunchAttach] END (%d) Could not get inferior's Mach exception "
+             "port, "
+             "sending ptrace "
+             "PT_KILL to pid %i and exiting.",
+             getpid(), m_pid);
       ::ptrace(PT_KILL, m_pid, 0, 0);
       m_pid = INVALID_NUB_PROCESS;
       return INVALID_NUB_PROCESS;
@@ -3788,13 +3815,18 @@ pid_t MachProcess::BoardServiceLaunchForDebug(
 
     StartSTDIOThread();
     SetState(eStateAttaching);
+    DNBLog("[LaunchAttach] (%d) About to ptrace(PT_ATTACHEXC, %d)...", getpid(),
+           m_pid);
     int err = ::ptrace(PT_ATTACHEXC, m_pid, 0, 0);
+    DNBLog("[LaunchAttach] (%d) Completed ptrace(PT_ATTACHEXC, %d) == %d",
+           getpid(), m_pid, err);
     if (err == 0) {
       m_flags |= eMachProcessFlagsAttached;
-      DNBLogThreadedIf(LOG_PROCESS, "successfully attached to pid %d", m_pid);
+      DNBLog("[LaunchAttach] successfully attached to pid %d", m_pid);
     } else {
       SetState(eStateExited);
-      DNBLogThreadedIf(LOG_PROCESS, "error: failed to attach to pid %d", m_pid);
+      DNBLog("[LaunchAttach] END (%d) error: failed to attach to pid %d",
+             getpid(), m_pid);
     }
   }
   return m_pid;
@@ -4132,4 +4164,18 @@ bool MachProcess::ProcessUsingBackBoard() {
 bool MachProcess::ProcessUsingFrontBoard() {
   CalculateBoardStatus();
   return (m_flags & eMachProcessFlagsUsingFBS) != 0;
+}
+
+int MachProcess::GetInferiorAddrSize(pid_t pid) {
+  int pointer_size = 8;
+  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+  struct kinfo_proc processInfo;
+  size_t bufsize = sizeof(processInfo);
+  if (sysctl(mib, (unsigned)(sizeof(mib) / sizeof(int)), &processInfo, &bufsize,
+             NULL, 0) == 0 &&
+      bufsize > 0) {
+    if ((processInfo.kp_proc.p_flag & P_LP64) == 0)
+      pointer_size = 4;
+  }
+  return pointer_size;
 }

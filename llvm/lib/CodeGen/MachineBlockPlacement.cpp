@@ -193,6 +193,7 @@ static cl::opt<unsigned> TriangleChainCount(
     cl::init(2),
     cl::Hidden);
 
+namespace llvm {
 extern cl::opt<unsigned> StaticLikelyProb;
 extern cl::opt<unsigned> ProfileLikelyProb;
 
@@ -204,6 +205,7 @@ extern cl::opt<GVDAGType> ViewBlockLayoutWithBFI;
 // Command line option to specify the name of the function for CFG dump
 // Defined in Analysis/BlockFrequencyInfo.cpp:  -view-bfi-func-name=
 extern cl::opt<std::string> ViewBlockFreqFuncName;
+} // namespace llvm
 
 namespace {
 
@@ -2048,6 +2050,8 @@ MachineBlockPlacement::findBestLoopTopHelper(
   BlockChain &HeaderChain = *BlockToChain[OldTop];
   if (!LoopBlockSet.count(*HeaderChain.begin()))
     return OldTop;
+  if (OldTop != *HeaderChain.begin())
+    return OldTop;
 
   LLVM_DEBUG(dbgs() << "Finding best loop top for: " << getBlockName(OldTop)
                     << "\n");
@@ -2543,10 +2547,14 @@ MachineBlockPlacement::collectLoopBlockSet(const MachineLoop &L) {
                     MBPI->getEdgeProbability(LoopPred, L.getHeader());
 
     for (MachineBasicBlock *LoopBB : L.getBlocks()) {
+      if (LoopBlockSet.count(LoopBB))
+        continue;
       auto Freq = MBFI->getBlockFreq(LoopBB).getFrequency();
       if (Freq == 0 || LoopFreq.getFrequency() / Freq > LoopToColdBlockRatio)
         continue;
-      LoopBlockSet.insert(LoopBB);
+      BlockChain *Chain = BlockToChain[LoopBB];
+      for (MachineBasicBlock *ChainBB : *Chain)
+        LoopBlockSet.insert(ChainBB);
     }
   } else
     LoopBlockSet.insert(L.block_begin(), L.block_end());
@@ -3156,8 +3164,8 @@ void MachineBlockPlacement::findDuplicateCandidates(
   MachineBasicBlock *Fallthrough = nullptr;
   BranchProbability DefaultBranchProb = BranchProbability::getZero();
   BlockFrequency BBDupThreshold(scaleThreshold(BB));
-  SmallVector<MachineBasicBlock *, 8> Preds(BB->pred_begin(), BB->pred_end());
-  SmallVector<MachineBasicBlock *, 8> Succs(BB->succ_begin(), BB->succ_end());
+  SmallVector<MachineBasicBlock *, 8> Preds(BB->predecessors());
+  SmallVector<MachineBasicBlock *, 8> Succs(BB->successors());
 
   // Sort for highest frequency.
   auto CmpSucc = [&](MachineBasicBlock *A, MachineBasicBlock *B) {
@@ -3332,6 +3340,13 @@ bool MachineBlockPlacement::runOnMachineFunction(MachineFunction &MF) {
         TailDupPlacementAggressiveThreshold.getNumOccurrences() != 0)
       TailDupSize = TailDupPlacementAggressiveThreshold;
   }
+
+  // If there's no threshold provided through options, query the target
+  // information for a threshold instead.
+  if (TailDupPlacementThreshold.getNumOccurrences() == 0 &&
+      (PassConfig->getOptLevel() < CodeGenOpt::Aggressive ||
+       TailDupPlacementAggressiveThreshold.getNumOccurrences() == 0))
+    TailDupSize = TII->getTailDuplicateSize(PassConfig->getOptLevel());
 
   if (allowTailDupPlacement()) {
     MPDT = &getAnalysis<MachinePostDominatorTree>();

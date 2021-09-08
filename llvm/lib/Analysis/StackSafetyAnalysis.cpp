@@ -263,6 +263,8 @@ ConstantRange StackSafetyLocalAnalysis::offsetFrom(Value *Addr, Value *Base) {
   const SCEV *AddrExp = SE.getTruncateOrZeroExtend(SE.getSCEV(Addr), PtrTy);
   const SCEV *BaseExp = SE.getTruncateOrZeroExtend(SE.getSCEV(Base), PtrTy);
   const SCEV *Diff = SE.getMinusSCEV(AddrExp, BaseExp);
+  if (isa<SCEVCouldNotCompute>(Diff))
+    return UnknownRange;
 
   ConstantRange Offset = SE.getSignedRange(Diff);
   if (isUnsafe(Offset))
@@ -456,7 +458,7 @@ FunctionInfo<GlobalValue> StackSafetyLocalAnalysis::run() {
     analyzeAllUses(AI, UI, SL);
   }
 
-  for (Argument &A : make_range(F.arg_begin(), F.arg_end())) {
+  for (Argument &A : F.args()) {
     // Non pointers and bypass arguments are not going to be used in any global
     // processing.
     if (A.getType()->isPointerTy() && !A.hasByValAttr()) {

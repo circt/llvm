@@ -76,6 +76,7 @@ unsigned ARM::parseArchVersion(StringRef Arch) {
   case ArchKind::ARMV8_4A:
   case ArchKind::ARMV8_5A:
   case ArchKind::ARMV8_6A:
+  case ArchKind::ARMV8_7A:
   case ArchKind::ARMV8R:
   case ArchKind::ARMV8MBaseline:
   case ArchKind::ARMV8MMainline:
@@ -111,6 +112,7 @@ ARM::ProfileKind ARM::parseArchProfile(StringRef Arch) {
   case ArchKind::ARMV8_4A:
   case ArchKind::ARMV8_5A:
   case ArchKind::ARMV8_6A:
+  case ArchKind::ARMV8_7A:
     return ProfileKind::A;
   case ArchKind::ARMV2:
   case ArchKind::ARMV2A:
@@ -154,6 +156,7 @@ StringRef ARM::getArchSynonym(StringRef Arch) {
       .Case("v8.4a", "v8.4-a")
       .Case("v8.5a", "v8.5-a")
       .Case("v8.6a", "v8.6-a")
+      .Case("v8.7a", "v8.7-a")
       .Case("v8r", "v8-r")
       .Case("v8m.base", "v8-m.base")
       .Case("v8m.main", "v8-m.main")
@@ -210,8 +213,9 @@ bool ARM::getFPUFeatures(unsigned FPUKind, std::vector<StringRef> &Features) {
     const char *PlusName, *MinusName;
     NeonSupportLevel MinSupportLevel;
   } NeonFeatureInfoList[] = {
-    {"+neon", "-neon", NeonSupportLevel::Neon},
-    {"+crypto", "-crypto", NeonSupportLevel::Crypto},
+      {"+neon", "-neon", NeonSupportLevel::Neon},
+      {"+sha2", "-sha2", NeonSupportLevel::Crypto},
+      {"+aes", "-aes", NeonSupportLevel::Crypto},
   };
 
   for (const auto &Info: NeonFeatureInfoList) {
@@ -534,14 +538,6 @@ bool ARM::appendArchExtFeatures(StringRef CPU, ARM::ArchKind AK,
     return ARM::getFPUFeatures(FPUKind, Features);
   }
   return StartingNumFeatures != Features.size();
-}
-
-StringRef ARM::getHWDivName(uint64_t HWDivKind) {
-  for (const auto &D : HWDivNames) {
-    if (HWDivKind == D.ID)
-      return D.getName();
-  }
-  return StringRef();
 }
 
 StringRef ARM::getDefaultCPU(StringRef Arch) {

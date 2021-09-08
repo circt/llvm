@@ -130,7 +130,7 @@ long test_retAgg() {
   return b;
 }
 
-// EVAL-STATIC: @A = global %struct.Agg { i32 13, i64 17 }, align 8
+// EVAL-STATIC: @A ={{.*}} global %struct.Agg { i32 13, i64 17 }, align 8
 Agg A = retAgg();
 
 // EVAL-NOT: @_Z9retRefAggv()
@@ -209,4 +209,37 @@ long test_AggCtor() {
   const int i = 2;
   AggCtor C(i);
   return C.a + C.b;
+}
+
+struct UserConv {
+  consteval operator int() const noexcept { return 42; }
+};
+
+// EVAL-FN-LABEL: @_Z13test_UserConvv(
+// EVAL-FN-NEXT:  entry:
+// EVAL-FN-NEXT:    ret i32 42
+//
+int test_UserConv() {
+  return UserConv();
+}
+
+int test_UserConvOverload_helper(int a) { return a; }
+
+// EVAL-FN-LABEL: @_Z21test_UserConvOverloadv(
+// EVAL-FN-NEXT:  entry:
+// EVAL-FN-NEXT:    %call = call i32 @_Z28test_UserConvOverload_helperi(i32 42)
+// EVAL-FN-NEXT:    ret i32 %call
+//
+int test_UserConvOverload() {
+  return test_UserConvOverload_helper(UserConv());
+}
+
+consteval int test_UserConvOverload_helper_ceval(int a) { return a; }
+
+// EVAL-FN-LABEL: @_Z27test_UserConvOverload_cevalv(
+// EVAL-FN-NEXT:  entry:
+// EVAL-FN-NEXT:    ret i32 42
+//
+int test_UserConvOverload_ceval() {
+  return test_UserConvOverload_helper_ceval(UserConv());
 }

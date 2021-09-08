@@ -213,6 +213,17 @@ public:
                                                                            Pred,
                                                                    Constant *C);
 
+  static bool shouldAvoidAbsorbingNotIntoSelect(const SelectInst &SI) {
+    // a ? b : false and a ? true : b are the canonical form of logical and/or.
+    // This includes !a ? b : false and !a ? true : b. Absorbing the not into
+    // the select by swapping operands would break recognition of this pattern
+    // in other analyses, so don't do that.
+    return match(&SI, PatternMatch::m_LogicalAnd(PatternMatch::m_Value(),
+                                                 PatternMatch::m_Value())) ||
+           match(&SI, PatternMatch::m_LogicalOr(PatternMatch::m_Value(),
+                                                PatternMatch::m_Value()));
+  }
+
   /// Return true if the specified value is free to invert (apply ~ to).
   /// This happens in cases where the ~ can be eliminated.  If WillInvertAllUses
   /// is true, work under the assumption that the caller intends to remove all
@@ -235,12 +246,13 @@ public:
 
     // If `V` is of the form `A + Constant` then `-1 - V` can be folded into
     // `(-1 - Constant) - A` if we are willing to invert all of the uses.
-    if (BinaryOperator *BO = dyn_cast<BinaryOperator>(V))
-      if (BO->getOpcode() == Instruction::Add ||
-          BO->getOpcode() == Instruction::Sub)
-        if (isa<Constant>(BO->getOperand(0)) ||
-            isa<Constant>(BO->getOperand(1)))
-          return WillInvertAllUses;
+    if (match(V, m_Add(PatternMatch::m_Value(), PatternMatch::m_ImmConstant())))
+      return WillInvertAllUses;
+
+    // If `V` is of the form `Constant - A` then `-1 - V` can be folded into
+    // `A + (-1 - Constant)` if we are willing to invert all of the uses.
+    if (match(V, m_Sub(PatternMatch::m_ImmConstant(), PatternMatch::m_Value())))
+      return WillInvertAllUses;
 
     // Selects with invertible operands are freely invertible
     if (match(V,
@@ -248,12 +260,17 @@ public:
                        m_Not(PatternMatch::m_Value()))))
       return WillInvertAllUses;
 
+    // Min/max may be in the form of intrinsics, so handle those identically
+    // to select patterns.
+    if (match(V, m_MaxOrMin(m_Not(PatternMatch::m_Value()),
+                            m_Not(PatternMatch::m_Value()))))
+      return WillInvertAllUses;
+
     return false;
   }
 
   /// Given i1 V, can every user of V be freely adapted if V is changed to !V ?
-  /// InstCombine's canonicalizeICmpPredicate() must be kept in sync with this
-  /// fn.
+  /// InstCombine's freelyInvertAllUsersOf() must be kept in sync with this fn.
   ///
   /// See also: isFreeToInvert()
   static bool canFreelyInvertAllUsersOf(Value *V, Value *IgnoredUser) {
@@ -266,6 +283,8 @@ public:
       switch (I->getOpcode()) {
       case Instruction::Select:
         if (U.getOperandNo() != 0) // Only if the value is used as select cond.
+          return false;
+        if (shouldAvoidAbsorbingNotIntoSelect(*cast<SelectInst>(I)))
           return false;
         break;
       case Instruction::Br:
@@ -340,14 +359,6 @@ public:
       Out[i] = isa<UndefValue>(C) ? SafeC : C;
     }
     return ConstantVector::get(Out);
-  }
-
-  /// Create and insert the idiom we use to indicate a block is unreachable
-  /// without having to rewrite the CFG from within InstCombine.
-  static void CreateNonTerminatorUnreachable(Instruction *InsertAt) {
-    auto &Ctx = InsertAt->getContext();
-    new StoreInst(ConstantInt::getTrue(Ctx),
-                  UndefValue::get(Type::getInt1PtrTy(Ctx)), InsertAt);
   }
 
   void addToWorklist(Instruction *I) { Worklist.push(I); }

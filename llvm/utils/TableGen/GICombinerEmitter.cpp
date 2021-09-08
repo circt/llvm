@@ -15,6 +15,7 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/TableGen/Error.h"
@@ -241,13 +242,12 @@ public:
     bool Progressed = false;
     SmallSet<GIMatchDagEdge *, 20> EdgesToRemove;
     while (!EdgesRemaining.empty()) {
-      for (auto EI = EdgesRemaining.begin(), EE = EdgesRemaining.end();
-           EI != EE; ++EI) {
-        if (Visited.count((*EI)->getFromMI())) {
-          if (Roots.count((*EI)->getToMI()))
+      for (auto *EI : EdgesRemaining) {
+        if (Visited.count(EI->getFromMI())) {
+          if (Roots.count(EI->getToMI()))
             PrintError(TheDef.getLoc(), "One or more roots are unnecessary");
-          Visited.insert((*EI)->getToMI());
-          EdgesToRemove.insert(*EI);
+          Visited.insert(EI->getToMI());
+          EdgesToRemove.insert(EI);
           Progressed = true;
         }
       }
@@ -432,9 +432,9 @@ bool CombineRule::parseInstructionMatcher(
       }
 
       if (InstrOperand.isDef()) {
-        if (find_if(Roots, [&](const RootInfo &X) {
+        if (any_of(Roots, [&](const RootInfo &X) {
               return X.getPatternSymbol() == Name;
-            }) != Roots.end()) {
+            })) {
           N->setMatchRoot();
         }
       }
@@ -460,9 +460,9 @@ bool CombineRule::parseWipMatchOpcodeMatcher(const CodeGenTarget &Target,
         MatchDag.addInstrNode(makeDebugName(*this, Name), insertStrTab(Name),
                               MatchDag.getContext().makeEmptyOperandList());
 
-    if (find_if(Roots, [&](const RootInfo &X) {
+    if (any_of(Roots, [&](const RootInfo &X) {
           return ArgName && X.getPatternSymbol() == ArgName->getValue();
-        }) != Roots.end()) {
+        })) {
       N->setMatchRoot();
     }
 

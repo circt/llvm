@@ -26,10 +26,12 @@ using namespace lldb;
 #pragma warning (disable : 4190)
 #endif
 
-extern "C" llvm::Expected<bool>
-LLDBSwigLuaBreakpointCallbackFunction(lua_State *L,
-                                      lldb::StackFrameSP stop_frame_sp,
-                                      lldb::BreakpointLocationSP bp_loc_sp);
+extern "C" llvm::Expected<bool> LLDBSwigLuaBreakpointCallbackFunction(
+    lua_State *L, lldb::StackFrameSP stop_frame_sp,
+    lldb::BreakpointLocationSP bp_loc_sp, StructuredDataImpl *extra_args_impl);
+
+extern "C" llvm::Expected<bool> LLDBSwigLuaWatchpointCallbackFunction(
+    lua_State *L, lldb::StackFrameSP stop_frame_sp, lldb::WatchpointSP wp_sp);
 
 #if _MSC_VER
 #pragma warning (pop)
@@ -98,11 +100,63 @@ llvm::Error Lua::RegisterBreakpointCallback(void *baton, const char *body) {
 
 llvm::Expected<bool>
 Lua::CallBreakpointCallback(void *baton, lldb::StackFrameSP stop_frame_sp,
-                            lldb::BreakpointLocationSP bp_loc_sp) {
+                            lldb::BreakpointLocationSP bp_loc_sp,
+                            StructuredData::ObjectSP extra_args_sp) {
+
   lua_pushlightuserdata(m_lua_state, baton);
   lua_gettable(m_lua_state, LUA_REGISTRYINDEX);
+  auto *extra_args_impl = [&]() -> StructuredDataImpl * {
+    if (extra_args_sp == nullptr)
+      return nullptr;
+    auto *extra_args_impl = new StructuredDataImpl();
+    extra_args_impl->SetObjectSP(extra_args_sp);
+    return extra_args_impl;
+  }();
   return LLDBSwigLuaBreakpointCallbackFunction(m_lua_state, stop_frame_sp,
-                                               bp_loc_sp);
+                                               bp_loc_sp, extra_args_impl);
+}
+
+llvm::Error Lua::RegisterWatchpointCallback(void *baton, const char *body) {
+  lua_pushlightuserdata(m_lua_state, baton);
+  const char *fmt_str = "return function(frame, wp, ...) {0} end";
+  std::string func_str = llvm::formatv(fmt_str, body).str();
+  if (luaL_dostring(m_lua_state, func_str.c_str()) != LUA_OK) {
+    llvm::Error e = llvm::make_error<llvm::StringError>(
+        llvm::formatv("{0}", lua_tostring(m_lua_state, -1)),
+        llvm::inconvertibleErrorCode());
+    // Pop error message from the stack.
+    lua_pop(m_lua_state, 2);
+    return e;
+  }
+  lua_settable(m_lua_state, LUA_REGISTRYINDEX);
+  return llvm::Error::success();
+}
+
+llvm::Expected<bool>
+Lua::CallWatchpointCallback(void *baton, lldb::StackFrameSP stop_frame_sp,
+                            lldb::WatchpointSP wp_sp) {
+
+  lua_pushlightuserdata(m_lua_state, baton);
+  lua_gettable(m_lua_state, LUA_REGISTRYINDEX);
+  return LLDBSwigLuaWatchpointCallbackFunction(m_lua_state, stop_frame_sp,
+                                               wp_sp);
+}
+
+llvm::Error Lua::CheckSyntax(llvm::StringRef buffer) {
+  int error =
+      luaL_loadbuffer(m_lua_state, buffer.data(), buffer.size(), "buffer");
+  if (error == LUA_OK) {
+    // Pop buffer
+    lua_pop(m_lua_state, 1);
+    return llvm::Error::success();
+  }
+
+  llvm::Error e = llvm::make_error<llvm::StringError>(
+      llvm::formatv("{0}\n", lua_tostring(m_lua_state, -1)),
+      llvm::inconvertibleErrorCode());
+  // Pop error message from the stack.
+  lua_pop(m_lua_state, 1);
+  return e;
 }
 
 llvm::Error Lua::LoadModule(llvm::StringRef filename) {

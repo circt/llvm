@@ -27,13 +27,13 @@ define void @foo(i64* %.n, [0 x %_elem_type_of_x]* %.x, [0 x %_elem_type_of_y]* 
 ; CHECK-NEXT:    .p2align 5
 ; CHECK-NEXT:  .LBB0_2: # %_loop_1_do_
 ; CHECK-NEXT:    #
-; CHECK-NEXT:    lxvp vsp2, 0(r3)
-; CHECK-NEXT:    lxvp vsp4, 32(r3)
+; CHECK-NEXT:    lxvp vsp34, 0(r3)
+; CHECK-NEXT:    lxvp vsp36, 32(r3)
 ; CHECK-NEXT:    addi r3, r3, 128
-; CHECK-NEXT:    xvadddp vs0, vs0, vs3
-; CHECK-NEXT:    xvadddp vs0, vs0, vs2
-; CHECK-NEXT:    xvadddp vs0, vs0, vs5
-; CHECK-NEXT:    xvadddp vs0, vs0, vs4
+; CHECK-NEXT:    xvadddp vs0, vs0, vs35
+; CHECK-NEXT:    xvadddp vs0, vs0, vs34
+; CHECK-NEXT:    xvadddp vs0, vs0, vs37
+; CHECK-NEXT:    xvadddp vs0, vs0, vs36
 ; CHECK-NEXT:    bdnz .LBB0_2
 ; CHECK-NEXT:  # %bb.3: # %_loop_1_loopHeader_._return_bb_crit_edge
 ; CHECK-NEXT:    stxv vs0, 0(r6)
@@ -54,13 +54,13 @@ define void @foo(i64* %.n, [0 x %_elem_type_of_x]* %.x, [0 x %_elem_type_of_y]* 
 ; CHECK-BE-NEXT:    .p2align 5
 ; CHECK-BE-NEXT:  .LBB0_2: # %_loop_1_do_
 ; CHECK-BE-NEXT:    #
-; CHECK-BE-NEXT:    lxvp vsp2, 0(r3)
-; CHECK-BE-NEXT:    lxvp vsp4, 32(r3)
+; CHECK-BE-NEXT:    lxvp vsp34, 0(r3)
+; CHECK-BE-NEXT:    lxvp vsp36, 32(r3)
 ; CHECK-BE-NEXT:    addi r3, r3, 128
-; CHECK-BE-NEXT:    xvadddp vs0, vs0, vs2
-; CHECK-BE-NEXT:    xvadddp vs0, vs0, vs3
-; CHECK-BE-NEXT:    xvadddp vs0, vs0, vs4
-; CHECK-BE-NEXT:    xvadddp vs0, vs0, vs5
+; CHECK-BE-NEXT:    xvadddp vs0, vs0, vs34
+; CHECK-BE-NEXT:    xvadddp vs0, vs0, vs35
+; CHECK-BE-NEXT:    xvadddp vs0, vs0, vs36
+; CHECK-BE-NEXT:    xvadddp vs0, vs0, vs37
 ; CHECK-BE-NEXT:    bdnz .LBB0_2
 ; CHECK-BE-NEXT:  # %bb.3: # %_loop_1_loopHeader_._return_bb_crit_edge
 ; CHECK-BE-NEXT:    stxv vs0, 0(r6)
@@ -81,13 +81,13 @@ _loop_1_do_:                                      ; preds = %_loop_1_do_.lr.ph, 
   %x_ix_dim_0_6 = getelementptr %_elem_type_of_x, %_elem_type_of_x* %x_rvo_based_addr_5, i64 %i.08
   %x_ix_dim_0_ = bitcast %_elem_type_of_x* %x_ix_dim_0_6 to i8*
   %0 = getelementptr i8, i8* %x_ix_dim_0_, i64 1
-  %1 = tail call <256 x i1> @llvm.ppc.mma.lxvp(i8* %0)
-  %2 = tail call { <16 x i8>, <16 x i8> } @llvm.ppc.mma.disassemble.pair(<256 x i1> %1)
+  %1 = tail call <256 x i1> @llvm.ppc.vsx.lxvp(i8* %0)
+  %2 = tail call { <16 x i8>, <16 x i8> } @llvm.ppc.vsx.disassemble.pair(<256 x i1> %1)
   %.fca.0.extract1 = extractvalue { <16 x i8>, <16 x i8> } %2, 0
   %.fca.1.extract2 = extractvalue { <16 x i8>, <16 x i8> } %2, 1
   %3 = getelementptr i8, i8* %x_ix_dim_0_, i64 33
-  %4 = tail call <256 x i1> @llvm.ppc.mma.lxvp(i8* %3)
-  %5 = tail call { <16 x i8>, <16 x i8> } @llvm.ppc.mma.disassemble.pair(<256 x i1> %4)
+  %4 = tail call <256 x i1> @llvm.ppc.vsx.lxvp(i8* %3)
+  %5 = tail call { <16 x i8>, <16 x i8> } @llvm.ppc.vsx.disassemble.pair(<256 x i1> %4)
   %.fca.0.extract = extractvalue { <16 x i8>, <16 x i8> } %5, 0
   %.fca.1.extract = extractvalue { <16 x i8>, <16 x i8> } %5, 1
   %6 = bitcast <16 x i8> %.fca.0.extract1 to <2 x double>
@@ -110,5 +110,5 @@ _return_bb:                                       ; preds = %_loop_1_loopHeader_
   ret void
 }
 
-declare <256 x i1> @llvm.ppc.mma.lxvp(i8*)
-declare { <16 x i8>, <16 x i8> } @llvm.ppc.mma.disassemble.pair(<256 x i1>)
+declare <256 x i1> @llvm.ppc.vsx.lxvp(i8*)
+declare { <16 x i8>, <16 x i8> } @llvm.ppc.vsx.disassemble.pair(<256 x i1>)

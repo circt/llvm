@@ -128,7 +128,7 @@ FileManager::getDirectoryRef(StringRef DirName, bool CacheFailure) {
   // Stat("C:") does not recognize "C:" as a valid directory
   std::string DirNameStr;
   if (DirName.size() > 1 && DirName.back() == ':' &&
-      DirName.equals_lower(llvm::sys::path::root_name(DirName))) {
+      DirName.equals_insensitive(llvm::sys::path::root_name(DirName))) {
     DirNameStr = DirName.str() + '.';
     DirName = DirNameStr;
   }
@@ -276,6 +276,18 @@ FileManager::getFileRef(StringRef Filename, bool openFile, bool CacheFailure) {
   } else {
     // Name mismatch. We need a redirect. First grab the actual entry we want
     // to return.
+    //
+    // This redirection logic intentionally leaks the external name of a
+    // redirected file that uses 'use-external-name' in \a
+    // vfs::RedirectionFileSystem. This allows clang to report the external
+    // name to users (in diagnostics) and to tools that don't have access to
+    // the VFS (in debug info and dependency '.d' files).
+    //
+    // FIXME: This is pretty complicated. It's also inconsistent with how
+    // "real" filesystems behave and confuses parts of clang expect to see the
+    // name-as-accessed on the \a FileEntryRef. Maybe the returned \a
+    // FileEntryRef::getName() could return the accessed name unmodified, but
+    // make the external name available via a separate API.
     auto &Redirection =
         *SeenFileEntries
              .insert({Status.getName(), FileEntryRef::MapValue(UFE, DirInfo)})
@@ -338,6 +350,25 @@ FileManager::getFileRef(StringRef Filename, bool openFile, bool CacheFailure) {
   return ReturnedRef;
 }
 
+llvm::Expected<FileEntryRef> FileManager::getSTDIN() {
+  // Only read stdin once.
+  if (STDIN)
+    return *STDIN;
+
+  std::unique_ptr<llvm::MemoryBuffer> Content;
+  if (auto ContentOrError = llvm::MemoryBuffer::getSTDIN())
+    Content = std::move(*ContentOrError);
+  else
+    return llvm::errorCodeToError(ContentOrError.getError());
+
+  STDIN = getVirtualFileRef(Content->getBufferIdentifier(),
+                            Content->getBufferSize(), 0);
+  FileEntry &FE = const_cast<FileEntry &>(STDIN->getFileEntry());
+  FE.Content = std::move(Content);
+  FE.IsNamedPipe = true;
+  return *STDIN;
+}
+
 const FileEntry *FileManager::getVirtualFile(StringRef Filename, off_t Size,
                                              time_t ModificationTime) {
   return &getVirtualFileRef(Filename, Size, ModificationTime).getFileEntry();
@@ -365,9 +396,12 @@ FileEntryRef FileManager::getVirtualFileRef(StringRef Filename, off_t Size,
 
   // Now that all ancestors of Filename are in the cache, the
   // following call is guaranteed to find the DirectoryEntry from the
-  // cache.
-  auto DirInfo = expectedToOptional(
-      getDirectoryFromFile(*this, Filename, /*CacheFailure=*/true));
+  // cache. A virtual file can also have an empty filename, that could come
+  // from a source location preprocessor directive with an empty filename as
+  // an example, so we need to pretend it has a name to ensure a valid directory
+  // entry can be returned.
+  auto DirInfo = expectedToOptional(getDirectoryFromFile(
+      *this, Filename.empty() ? "." : Filename, /*CacheFailure=*/true));
   assert(DirInfo &&
          "The directory of a virtual file should already be in the cache.");
 
@@ -486,10 +520,14 @@ void FileManager::fillRealPathName(FileEntry *UFE, llvm::StringRef FileName) {
 llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>>
 FileManager::getBufferForFile(const FileEntry *Entry, bool isVolatile,
                               bool RequiresNullTerminator) {
+  // If the content is living on the file entry, return a reference to it.
+  if (Entry->Content)
+    return llvm::MemoryBuffer::getMemBuffer(Entry->Content->getMemBufferRef());
+
   uint64_t FileSize = Entry->getSize();
   // If there's a high enough chance that the file have changed since we
   // got its size, force a stat before opening it.
-  if (isVolatile)
+  if (isVolatile || Entry->isNamedPipe())
     FileSize = -1;
 
   StringRef Filename = Entry->getName();
@@ -585,7 +623,7 @@ StringRef FileManager::getCanonicalName(const DirectoryEntry *Dir) {
 
   SmallString<4096> CanonicalNameBuf;
   if (!FS->getRealPath(Dir->getName(), CanonicalNameBuf))
-    CanonicalName = StringRef(CanonicalNameBuf).copy(CanonicalNameStorage);
+    CanonicalName = CanonicalNameBuf.str().copy(CanonicalNameStorage);
 
   CanonicalNames.insert({Dir, CanonicalName});
   return CanonicalName;
@@ -601,7 +639,7 @@ StringRef FileManager::getCanonicalName(const FileEntry *File) {
 
   SmallString<4096> CanonicalNameBuf;
   if (!FS->getRealPath(File->getName(), CanonicalNameBuf))
-    CanonicalName = StringRef(CanonicalNameBuf).copy(CanonicalNameStorage);
+    CanonicalName = CanonicalNameBuf.str().copy(CanonicalNameStorage);
 
   CanonicalNames.insert({File, CanonicalName});
   return CanonicalName;

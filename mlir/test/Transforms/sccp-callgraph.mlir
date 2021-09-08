@@ -1,5 +1,5 @@
 // RUN: mlir-opt -allow-unregistered-dialect %s -sccp -split-input-file | FileCheck %s
-// RUN: mlir-opt -allow-unregistered-dialect %s -pass-pipeline="module(sccp)" -split-input-file | FileCheck %s --check-prefix=NESTED
+// RUN: mlir-opt -allow-unregistered-dialect %s -pass-pipeline="builtin.module(sccp)" -split-input-file | FileCheck %s --check-prefix=NESTED
 
 /// Check that a constant is properly propagated through the arguments and
 /// results of a private function.
@@ -188,7 +188,7 @@ func private @complex_inner_if(%arg0 : i32) -> i32 {
   // CHECK: cond_br %[[TRUE]], ^bb1
 
   %cst_20 = constant 20 : i32
-  %cond = cmpi "ult", %arg0, %cst_20 : i32
+  %cond = cmpi ult, %arg0, %cst_20 : i32
   cond_br %cond, ^bb1, ^bb2
 
 ^bb1:

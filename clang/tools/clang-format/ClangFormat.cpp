@@ -104,18 +104,6 @@ static cl::opt<bool> SortIncludes(
              "SortIncludes style flag"),
     cl::cat(ClangFormatCategory));
 
-// using the full param name as Wno-error probably won't be a common use case in
-// clang-format
-static cl::opt<bool> AllowUnknownOptions(
-    "Wno-error=unknown",
-    cl::desc("If set, unknown format options are only warned about.\n"
-             "This can be used to enable formatting, even if the\n"
-             "configuration contains unknown (newer) options.\n"
-             "Use with caution, as this might lead to dramatically\n"
-             "differing format depending on an option being\n"
-             "supported or not."),
-    cl::init(false), cl::cat(ClangFormatCategory));
-
 static cl::opt<bool>
     Verbose("verbose", cl::desc("If set, shows the list of processed files"),
             cl::cat(ClangFormatCategory));
@@ -155,6 +143,23 @@ static cl::opt<bool>
     WarningsAsErrors("Werror",
                      cl::desc("If set, changes formatting warnings to errors"),
                      cl::cat(ClangFormatCategory));
+
+namespace {
+enum class WNoError { Unknown };
+}
+
+static cl::bits<WNoError> WNoErrorList(
+    "Wno-error",
+    cl::desc("If set don't error out on the specified warning type."),
+    cl::values(
+        clEnumValN(WNoError::Unknown, "unknown",
+                   "If set, unknown format options are only warned about.\n"
+                   "This can be used to enable formatting, even if the\n"
+                   "configuration contains unknown (newer) options.\n"
+                   "Use with caution, as this might lead to dramatically\n"
+                   "differing format depending on an option being\n"
+                   "supported or not.")),
+    cl::cat(ClangFormatCategory));
 
 static cl::opt<bool>
     ShowColors("fcolor-diagnostics",
@@ -391,17 +396,32 @@ static bool format(StringRef FileName) {
 
   llvm::Expected<FormatStyle> FormatStyle =
       getStyle(Style, AssumedFileName, FallbackStyle, Code->getBuffer(),
-               nullptr, AllowUnknownOptions.getValue());
+               nullptr, WNoErrorList.isSet(WNoError::Unknown));
   if (!FormatStyle) {
     llvm::errs() << llvm::toString(FormatStyle.takeError()) << "\n";
     return true;
   }
 
-  if (SortIncludes.getNumOccurrences() != 0)
-    FormatStyle->SortIncludes = SortIncludes;
+  if (SortIncludes.getNumOccurrences() != 0) {
+    if (SortIncludes)
+      FormatStyle->SortIncludes = FormatStyle::SI_CaseSensitive;
+    else
+      FormatStyle->SortIncludes = FormatStyle::SI_Never;
+  }
   unsigned CursorPosition = Cursor;
   Replacements Replaces = sortIncludes(*FormatStyle, Code->getBuffer(), Ranges,
                                        AssumedFileName, &CursorPosition);
+
+  // To format JSON insert a variable to trick the code into thinking its
+  // JavaScript.
+  if (FormatStyle->isJson()) {
+    auto Err = Replaces.add(tooling::Replacement(
+        tooling::Replacement(AssumedFileName, 0, 0, "x = ")));
+    if (Err) {
+      llvm::errs() << "Bad Json variable insertion\n";
+    }
+  }
+
   auto ChangedCode = tooling::applyAllReplacements(Code->getBuffer(), Replaces);
   if (!ChangedCode) {
     llvm::errs() << llvm::toString(ChangedCode.takeError()) << "\n";
@@ -497,7 +517,8 @@ int main(int argc, const char **argv) {
   cl::SetVersionPrinter(PrintVersion);
   cl::ParseCommandLineOptions(
       argc, argv,
-      "A tool to format C/C++/Java/JavaScript/Objective-C/Protobuf/C# code.\n\n"
+      "A tool to format C/C++/Java/JavaScript/JSON/Objective-C/Protobuf/C# "
+      "code.\n\n"
       "If no arguments are specified, it formats the code from standard input\n"
       "and writes the result to the standard output.\n"
       "If <file>s are given, it reformats the files. If -i is specified\n"

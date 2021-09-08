@@ -1,9 +1,32 @@
-add_gen_header(
+add_header_library(
   common
-  DEF_FILE common.h.def
-  PARAMS
-    platform_defs=../../config/${LIBC_TARGET_OS}/platform_defs.h.inc
-  GEN_HDR common.h
-  DATA_FILES
-    ../../config/${LIBC_TARGET_OS}/platform_defs.h.inc
+  HDRS
+    common.h
+    endian.h
+    sanitizer.h
 )
+
+add_header_library(
+  ctype_utils
+  HDRS
+    ctype_utils.h
+)
+
+add_header_library(
+  str_conv_utils
+  HDRS
+    str_conv_utils.h
+  DEPENDS
+    .ctype_utils
+    libc.include.errno
+    libc.src.errno.__errno_location
+    libc.utils.CPP.standalone_cpp
+)
+
+add_header_library(
+  integer_operations
+  HDRS
+    integer_operations.h
+)
+
+add_subdirectory(FPUtil)

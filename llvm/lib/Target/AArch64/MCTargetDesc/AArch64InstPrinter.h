@@ -25,6 +25,8 @@ public:
   AArch64InstPrinter(const MCAsmInfo &MAI, const MCInstrInfo &MII,
                      const MCRegisterInfo &MRI);
 
+  bool applyTargetSpecificCLOption(StringRef Opt) override;
+
   void printInst(const MCInst *MI, uint64_t Address, StringRef Annot,
                  const MCSubtargetInfo &STI, raw_ostream &O) override;
   void printRegName(raw_ostream &OS, unsigned RegNo) const override;
@@ -144,6 +146,9 @@ protected:
                        const MCSubtargetInfo &STI, raw_ostream &O,
                        StringRef LayoutSuffix);
 
+  void printMatrixTileList(const MCInst *MI, unsigned OpNum,
+                           const MCSubtargetInfo &STI, raw_ostream &O);
+
   /// Print a list of vector registers where the type suffix is implicit
   /// (i.e. attached to the instruction rather than the registers).
   void printImplicitlyTypedVectorList(const MCInst *MI, unsigned OpNum,
@@ -156,10 +161,12 @@ protected:
 
   void printVectorIndex(const MCInst *MI, unsigned OpNum,
                         const MCSubtargetInfo &STI, raw_ostream &O);
-  void printAdrpLabel(const MCInst *MI, unsigned OpNum,
+  void printAdrpLabel(const MCInst *MI, uint64_t Address, unsigned OpNum,
                       const MCSubtargetInfo &STI, raw_ostream &O);
   void printBarrierOption(const MCInst *MI, unsigned OpNum,
                           const MCSubtargetInfo &STI, raw_ostream &O);
+  void printBarriernXSOption(const MCInst *MI, unsigned OpNum,
+                             const MCSubtargetInfo &STI, raw_ostream &O);
   void printMSRSystemRegister(const MCInst *MI, unsigned OpNum,
                               const MCSubtargetInfo &STI, raw_ostream &O);
   void printMRSSystemRegister(const MCInst *MI, unsigned OpNum,
@@ -183,11 +190,24 @@ protected:
                           const MCSubtargetInfo &STI, raw_ostream &O);
   void printSVEPattern(const MCInst *MI, unsigned OpNum,
                        const MCSubtargetInfo &STI, raw_ostream &O);
+
+  template <bool IsVertical>
+  void printMatrixTileVector(const MCInst *MI, unsigned OpNum,
+                             const MCSubtargetInfo &STI, raw_ostream &O);
+  void printMatrixTile(const MCInst *MI, unsigned OpNum,
+                       const MCSubtargetInfo &STI, raw_ostream &O);
+  template <int EltSize>
+  void printMatrix(const MCInst *MI, unsigned OpNum, const MCSubtargetInfo &STI,
+                   raw_ostream &O);
+  void printSVCROp(const MCInst *MI, unsigned OpNum, const MCSubtargetInfo &STI,
+                   raw_ostream &O);
   template <char = 0>
   void printSVERegOp(const MCInst *MI, unsigned OpNum,
                     const MCSubtargetInfo &STI, raw_ostream &O);
   void printGPR64as32(const MCInst *MI, unsigned OpNum,
                       const MCSubtargetInfo &STI, raw_ostream &O);
+  void printGPR64x8(const MCInst *MI, unsigned OpNum,
+                    const MCSubtargetInfo &STI, raw_ostream &O);
   template <int Width>
   void printZPRasFPR(const MCInst *MI, unsigned OpNum,
                      const MCSubtargetInfo &STI, raw_ostream &O);

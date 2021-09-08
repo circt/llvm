@@ -130,21 +130,21 @@
 // Verify that  -nocudalib prevents linking libdevice bitcode in.
 // RUN: %clang -### -v --target=i386-unknown-linux --cuda-gpu-arch=sm_35 \
 // RUN:   -nocudalib --cuda-path=%S/Inputs/CUDA/usr/local/cuda %s 2>&1 \
-// RUN:   | FileCheck %s -check-prefix COMMON -check-prefix NOLIBDEVICE
+// RUN:   | FileCheck %s -check-prefix COMMON
 // RUN: %clang -### -v --target=i386-apple-macosx --cuda-gpu-arch=sm_35 \
 // RUN:   -nocudalib --cuda-path=%S/Inputs/CUDA/usr/local/cuda %s 2>&1 \
-// RUN:   | FileCheck %s -check-prefix COMMON -check-prefix NOLIBDEVICE
+// RUN:   | FileCheck %s -check-prefix COMMON
 
 // Verify that we don't add include paths, link with libdevice or
 // -include __clang_cuda_runtime_wrapper.h without valid CUDA installation.
 // RUN: %clang -### -v --target=i386-unknown-linux --cuda-gpu-arch=sm_35 \
 // RUN:   --cuda-path=%S/no-cuda-there %s 2>&1 \
 // RUN:   | FileCheck %s -check-prefix COMMON \
-// RUN:     -check-prefix NOCUDAINC -check-prefix NOLIBDEVICE
+// RUN:     -check-prefix NOCUDAINC
 // RUN: %clang -### -v --target=i386-apple-macosx --cuda-gpu-arch=sm_35 \
 // RUN:   --cuda-path=%S/no-cuda-there %s 2>&1 \
 // RUN:   | FileCheck %s -check-prefix COMMON \
-// RUN:     -check-prefix NOCUDAINC -check-prefix NOLIBDEVICE
+// RUN:     -check-prefix NOCUDAINC
 
 // Verify that C++ include paths are passed for both host and device frontends.
 // RUN: %clang -### -no-canonical-prefixes -target x86_64-linux-gnu %s \
@@ -166,7 +166,7 @@
 // NO-LIBDEVICE: Found CUDA installation: {{.*}}/Inputs/CUDA-nolibdevice/usr/local/cuda
 // NOCUDA-NOT: Found CUDA installation:
 
-// MISSINGLIBDEVICE: error: cannot find libdevice for sm_20.
+// MISSINGLIBDEVICE: error: cannot find libdevice for sm_20;
 
 // COMMON: "-triple" "nvptx-nvidia-cuda"
 // COMMON64: "-triple" "nvptx64-nvidia-cuda"

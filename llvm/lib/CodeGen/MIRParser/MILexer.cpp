@@ -226,6 +226,7 @@ static MIToken::TokenKind getIdentifierKind(StringRef Identifier) {
       .Case("adjust_cfa_offset", MIToken::kw_cfi_adjust_cfa_offset)
       .Case("escape", MIToken::kw_cfi_escape)
       .Case("def_cfa", MIToken::kw_cfi_def_cfa)
+      .Case("llvm_def_aspace_cfa", MIToken::kw_cfi_llvm_def_aspace_cfa)
       .Case("remember_state", MIToken::kw_cfi_remember_state)
       .Case("restore", MIToken::kw_cfi_restore)
       .Case("restore_state", MIToken::kw_cfi_restore_state)
@@ -249,6 +250,7 @@ static MIToken::TokenKind getIdentifierKind(StringRef Identifier) {
       .Case("dereferenceable", MIToken::kw_dereferenceable)
       .Case("invariant", MIToken::kw_invariant)
       .Case("align", MIToken::kw_align)
+      .Case("basealign", MIToken::kw_align)
       .Case("addrspace", MIToken::kw_addrspace)
       .Case("stack", MIToken::kw_stack)
       .Case("got", MIToken::kw_got)
@@ -270,6 +272,8 @@ static MIToken::TokenKind getIdentifierKind(StringRef Identifier) {
       .Case("heap-alloc-marker", MIToken::kw_heap_alloc_marker)
       .Case("bbsections", MIToken::kw_bbsections)
       .Case("unknown-size", MIToken::kw_unknown_size)
+      .Case("unknown-address", MIToken::kw_unknown_address)
+      .Case("distinct", MIToken::kw_distinct)
       .Default(MIToken::Identifier);
 }
 

@@ -4,7 +4,7 @@
 ; RUN: llc -mtriple=riscv64 -mattr=+d -verify-machineinstrs < %s \
 ; RUN:   | FileCheck -check-prefix=RV64IFD %s
 
-define double @fld(double *%a) nounwind {
+define dso_local double @fld(double *%a) nounwind {
 ; RV32IFD-LABEL: fld:
 ; RV32IFD:       # %bb.0:
 ; RV32IFD-NEXT:    addi sp, sp, -16
@@ -33,7 +33,7 @@ define double @fld(double *%a) nounwind {
   ret double %4
 }
 
-define void @fsd(double *%a, double %b, double %c) nounwind {
+define dso_local void @fsd(double *%a, double %b, double %c) nounwind {
 ; RV32IFD-LABEL: fsd:
 ; RV32IFD:       # %bb.0:
 ; RV32IFD-NEXT:    addi sp, sp, -16
@@ -67,9 +67,9 @@ define void @fsd(double *%a, double %b, double %c) nounwind {
 }
 
 ; Check load and store to a global
-@G = global double 0.0
+@G = dso_local global double 0.0
 
-define double @fld_fsd_global(double %a, double %b) nounwind {
+define dso_local double @fld_fsd_global(double %a, double %b) nounwind {
 ; RV32IFD-LABEL: fld_fsd_global:
 ; RV32IFD:       # %bb.0:
 ; RV32IFD-NEXT:    addi sp, sp, -16
@@ -117,7 +117,7 @@ define double @fld_fsd_global(double %a, double %b) nounwind {
 }
 
 ; Ensure that 1 is added to the high 20 bits if bit 11 of the low part is 1
-define double @fld_fsd_constant(double %a) nounwind {
+define dso_local double @fld_fsd_constant(double %a) nounwind {
 ; RV32IFD-LABEL: fld_fsd_constant:
 ; RV32IFD:       # %bb.0:
 ; RV32IFD-NEXT:    addi sp, sp, -16
@@ -136,9 +136,8 @@ define double @fld_fsd_constant(double %a) nounwind {
 ;
 ; RV64IFD-LABEL: fld_fsd_constant:
 ; RV64IFD:       # %bb.0:
-; RV64IFD-NEXT:    lui a1, 56
-; RV64IFD-NEXT:    addiw a1, a1, -1353
-; RV64IFD-NEXT:    slli a1, a1, 14
+; RV64IFD-NEXT:    lui a1, 228023
+; RV64IFD-NEXT:    slli a1, a1, 2
 ; RV64IFD-NEXT:    fld ft0, -273(a1)
 ; RV64IFD-NEXT:    fmv.d.x ft1, a0
 ; RV64IFD-NEXT:    fadd.d ft0, ft1, ft0
@@ -154,7 +153,7 @@ define double @fld_fsd_constant(double %a) nounwind {
 
 declare void @notdead(i8*)
 
-define double @fld_stack(double %a) nounwind {
+define dso_local double @fld_stack(double %a) nounwind {
 ; RV32IFD-LABEL: fld_stack:
 ; RV32IFD:       # %bb.0:
 ; RV32IFD-NEXT:    addi sp, sp, -32
@@ -198,7 +197,7 @@ define double @fld_stack(double %a) nounwind {
   ret double %4
 }
 
-define void @fsd_stack(double %a, double %b) nounwind {
+define dso_local void @fsd_stack(double %a, double %b) nounwind {
 ; RV32IFD-LABEL: fsd_stack:
 ; RV32IFD:       # %bb.0:
 ; RV32IFD-NEXT:    addi sp, sp, -32
@@ -239,7 +238,7 @@ define void @fsd_stack(double %a, double %b) nounwind {
 }
 
 ; Test selection of store<ST4[%a], trunc to f32>, ..
-define void @fsd_trunc(float* %a, double %b) nounwind noinline optnone {
+define dso_local void @fsd_trunc(float* %a, double %b) nounwind noinline optnone {
 ; RV32IFD-LABEL: fsd_trunc:
 ; RV32IFD:       # %bb.0:
 ; RV32IFD-NEXT:    addi sp, sp, -16

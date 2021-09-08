@@ -68,35 +68,27 @@ struct PathDiagnosticConsumerOptions {
   /// Whether to include additional information about macro expansions
   /// with the diagnostics, because otherwise they can be hard to obtain
   /// without re-compiling the program under analysis.
-  bool ShouldDisplayMacroExpansions;
+  bool ShouldDisplayMacroExpansions = false;
 
   /// Whether to include LLVM statistics of the process in the diagnostic.
   /// Useful for profiling the tool on large real-world codebases.
-  bool ShouldSerializeStats;
+  bool ShouldSerializeStats = false;
 
   /// If the consumer intends to produce multiple output files, should it
-  /// use randomly generated file names for these files (with the tiny risk of
-  /// having random collisions) or deterministic human-readable file names
-  /// (with a larger risk of deterministic collisions or invalid characters
-  /// in the file name). We should not really give this choice to the users
-  /// because deterministic mode is always superior when done right, but
-  /// for some consumers this mode is experimental and needs to be
-  /// off by default.
-  bool ShouldWriteStableReportFilename;
+  /// use a pseudo-random file name name or a human-readable file name.
+  bool ShouldWriteVerboseReportFilename = false;
 
   /// Whether the consumer should treat consumed diagnostics as hard errors.
   /// Useful for breaking your build when issues are found.
-  bool ShouldDisplayWarningsAsErrors;
+  bool ShouldDisplayWarningsAsErrors = false;
 
   /// Whether the consumer should attempt to rewrite the source file
   /// with fix-it hints attached to the diagnostics it consumes.
-  bool ShouldApplyFixIts;
+  bool ShouldApplyFixIts = false;
 
   /// Whether the consumer should present the name of the entity that emitted
   /// the diagnostic (eg., a checker) so that the user knew how to disable it.
-  bool ShouldDisplayDiagnosticName;
-
-  PathDiagnosticConsumerOptions() = delete;
+  bool ShouldDisplayDiagnosticName = false;
 };
 
 class PathDiagnosticConsumer {
@@ -153,11 +145,14 @@ public:
     /// Only runs visitors, no output generated.
     None,
 
-    /// Used for HTML, SARIF, and text output.
+    /// Used for SARIF and text output.
     Minimal,
 
     /// Used for plist output, used for "arrows" generation.
     Extensive,
+
+    /// Used for HTML, shows both "arrows" and control notes.
+    Everything
   };
 
   virtual PathGenerationScheme getGenerationScheme() const { return Minimal; }
@@ -166,7 +161,11 @@ public:
     return getGenerationScheme() != None;
   }
 
-  bool shouldAddPathEdges() const { return getGenerationScheme() == Extensive; }
+  bool shouldAddPathEdges() const { return getGenerationScheme() >= Extensive; }
+  bool shouldAddControlNotes() const {
+    return getGenerationScheme() == Minimal ||
+           getGenerationScheme() == Everything;
+  }
 
   virtual bool supportsLogicalOpControlFlow() const { return false; }
 

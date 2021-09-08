@@ -74,7 +74,10 @@ static Error getRelocationValueString(const ELFObjectFile<ELFT> *Obj,
     const typename ELFT::Rela *ERela = Obj->getRela(Rel);
     Addend = ERela->r_addend;
     Undef = ERela->getSymbol(false) == 0;
-  } else if ((*SecOrErr)->sh_type != ELF::SHT_REL) {
+  } else if ((*SecOrErr)->sh_type == ELF::SHT_REL) {
+    const typename ELFT::Rel *ERel = Obj->getRel(Rel);
+    Undef = ERel->getSymbol(false) == 0;
+  } else {
     return make_error<BinaryError>();
   }
 
@@ -85,8 +88,13 @@ static Error getRelocationValueString(const ELFObjectFile<ELFT> *Obj,
 
   if (!Undef) {
     symbol_iterator SI = RelRef.getSymbol();
-    const typename ELFT::Sym *Sym = Obj->getSymbol(SI->getRawDataRefImpl());
-    if (Sym->getType() == ELF::STT_SECTION) {
+    Expected<const typename ELFT::Sym *> SymOrErr =
+        Obj->getSymbol(SI->getRawDataRefImpl());
+    // TODO: test this error.
+    if (!SymOrErr)
+      return SymOrErr.takeError();
+
+    if ((*SymOrErr)->getType() == ELF::STT_SECTION) {
       Expected<section_iterator> SymSI = SI->getSection();
       if (!SymSI)
         return SymSI.takeError();
@@ -172,7 +180,7 @@ static void printDynamicSection(const ELFFile<ELFT> &Elf, StringRef Filename) {
     MaxLen = std::max(MaxLen, Elf.getDynamicTagAsString(Dyn.d_tag).size());
   std::string TagFmt = "  %-" + std::to_string(MaxLen) + "s ";
 
-  outs() << "Dynamic Section:\n";
+  outs() << "\nDynamic Section:\n";
   for (const typename ELFT::Dyn &Dyn : DynamicEntries) {
     if (Dyn.d_tag == ELF::DT_NULL)
       continue;
@@ -200,7 +208,7 @@ static void printDynamicSection(const ELFFile<ELFT> &Elf, StringRef Filename) {
 
 template <class ELFT>
 static void printProgramHeaders(const ELFFile<ELFT> &Obj, StringRef FileName) {
-  outs() << "Program Header:\n";
+  outs() << "\nProgram Header:\n";
   auto ProgramHeaderOrError = Obj.program_headers();
   if (!ProgramHeaderOrError) {
     reportWarning("unable to read program headers: " +
@@ -267,13 +275,12 @@ static void printProgramHeaders(const ELFFile<ELFT> &Obj, StringRef FileName) {
            << ((Phdr.p_flags & ELF::PF_W) ? "w" : "-")
            << ((Phdr.p_flags & ELF::PF_X) ? "x" : "-") << "\n";
   }
-  outs() << "\n";
 }
 
 template <class ELFT>
 static void printSymbolVersionDependency(ArrayRef<uint8_t> Contents,
                                          StringRef StrTab) {
-  outs() << "Version References:\n";
+  outs() << "\nVersion References:\n";
 
   const uint8_t *Buf = Contents.data();
   while (Buf) {
@@ -299,7 +306,7 @@ template <class ELFT>
 static void printSymbolVersionDefinition(const typename ELFT::Shdr &Shdr,
                                          ArrayRef<uint8_t> Contents,
                                          StringRef StrTab) {
-  outs() << "Version definitions:\n";
+  outs() << "\nVersion definitions:\n";
 
   const uint8_t *Buf = Contents.data();
   uint32_t VerdefIndex = 1;

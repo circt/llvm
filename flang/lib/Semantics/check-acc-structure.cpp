@@ -65,22 +65,25 @@ bool AccStructureChecker::IsComputeConstruct(
 }
 
 bool AccStructureChecker::IsInsideComputeConstruct() const {
-  if (dirContext_.size() <= 1)
+  if (dirContext_.size() <= 1) {
     return false;
+  }
 
   // Check all nested context skipping the first one.
   for (std::size_t i = dirContext_.size() - 1; i > 0; --i) {
-    if (IsComputeConstruct(dirContext_[i - 1].directive))
+    if (IsComputeConstruct(dirContext_[i - 1].directive)) {
       return true;
+    }
   }
   return false;
 }
 
 void AccStructureChecker::CheckNotInComputeConstruct() {
-  if (IsInsideComputeConstruct())
+  if (IsInsideComputeConstruct()) {
     context_.Say(GetContext().directiveSource,
         "Directive %s may not be called within a compute region"_err_en_US,
         ContextDirectiveAsFortran());
+  }
 }
 
 void AccStructureChecker::Enter(const parser::AccClause &x) {
@@ -134,9 +137,31 @@ void AccStructureChecker::Enter(
 }
 
 void AccStructureChecker::Leave(
-    const parser::OpenACCStandaloneDeclarativeConstruct &) {
+    const parser::OpenACCStandaloneDeclarativeConstruct &x) {
   // Restriction - line 2409
   CheckAtLeastOneClause();
+
+  // Restriction - line 2417-2418 - In a Fortran module declaration section,
+  // only create, copyin, device_resident, and link clauses are allowed.
+  const auto &declarativeDir{std::get<parser::AccDeclarativeDirective>(x.t)};
+  const auto &scope{context_.FindScope(declarativeDir.source)};
+  const Scope &containingScope{GetProgramUnitContaining(scope)};
+  if (containingScope.kind() == Scope::Kind::Module) {
+    for (auto cl : GetContext().actualClauses) {
+      if (cl != llvm::acc::Clause::ACCC_create &&
+          cl != llvm::acc::Clause::ACCC_copyin &&
+          cl != llvm::acc::Clause::ACCC_device_resident &&
+          cl != llvm::acc::Clause::ACCC_link) {
+        context_.Say(GetContext().directiveSource,
+            "%s clause is not allowed on the %s directive in module "
+            "declaration "
+            "section"_err_en_US,
+            parser::ToUpperCaseLetters(
+                llvm::acc::getOpenACCClauseName(cl).str()),
+            ContextDirectiveAsFortran());
+      }
+    }
+  }
   dirContext_.pop_back();
 }
 
@@ -235,6 +260,18 @@ void AccStructureChecker::Leave(const parser::OpenACCStandaloneConstruct &x) {
 
 void AccStructureChecker::Enter(const parser::OpenACCRoutineConstruct &x) {
   PushContextAndClauseSets(x.source, llvm::acc::Directive::ACCD_routine);
+  const auto &optName{std::get<std::optional<parser::Name>>(x.t)};
+  if (!optName) {
+    const auto &verbatim{std::get<parser::Verbatim>(x.t)};
+    const auto &scope{context_.FindScope(verbatim.source)};
+    const Scope &containingScope{GetProgramUnitContaining(scope)};
+    if (containingScope.kind() == Scope::Kind::Module) {
+      context_.Say(GetContext().directiveSource,
+          "ROUTINE directive without name must appear within the specification "
+          "part of a subroutine or function definition, or within an interface "
+          "body for a subroutine or function in an interface block"_err_en_US);
+    }
+  }
 }
 void AccStructureChecker::Leave(const parser::OpenACCRoutineConstruct &) {
   // Restriction - line 2790
@@ -311,6 +348,7 @@ CHECK_SIMPLE_CLAUSE(VectorLength, ACCC_vector_length)
 CHECK_SIMPLE_CLAUSE(Wait, ACCC_wait)
 CHECK_SIMPLE_CLAUSE(Worker, ACCC_worker)
 CHECK_SIMPLE_CLAUSE(Write, ACCC_write)
+CHECK_SIMPLE_CLAUSE(Unknown, ACCC_unknown)
 
 void AccStructureChecker::Enter(const parser::AccClause::Create &c) {
   CheckAllowed(llvm::acc::Clause::ACCC_create);
@@ -334,8 +372,9 @@ void AccStructureChecker::Enter(const parser::AccClause::Copyin &c) {
   const auto &modifierClause{c.v};
   if (const auto &modifier{
           std::get<std::optional<parser::AccDataModifier>>(modifierClause.t)}) {
-    if (CheckAllowedModifier(llvm::acc::Clause::ACCC_copyin))
+    if (CheckAllowedModifier(llvm::acc::Clause::ACCC_copyin)) {
       return;
+    }
     if (modifier->v != parser::AccDataModifier::Modifier::ReadOnly) {
       context_.Say(GetContext().clauseSource,
           "Only the READONLY modifier is allowed for the %s clause "
@@ -353,8 +392,9 @@ void AccStructureChecker::Enter(const parser::AccClause::Copyout &c) {
   const auto &modifierClause{c.v};
   if (const auto &modifier{
           std::get<std::optional<parser::AccDataModifier>>(modifierClause.t)}) {
-    if (CheckAllowedModifier(llvm::acc::Clause::ACCC_copyout))
+    if (CheckAllowedModifier(llvm::acc::Clause::ACCC_copyout)) {
       return;
+    }
     if (modifier->v != parser::AccDataModifier::Modifier::Zero) {
       context_.Say(GetContext().clauseSource,
           "Only the ZERO modifier is allowed for the %s clause "

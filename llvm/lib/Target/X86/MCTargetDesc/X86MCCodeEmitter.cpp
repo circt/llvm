@@ -93,7 +93,8 @@ private:
   bool emitOpcodePrefix(int MemOperand, const MCInst &MI,
                         const MCSubtargetInfo &STI, raw_ostream &OS) const;
 
-  bool emitREXPrefix(int MemOperand, const MCInst &MI, raw_ostream &OS) const;
+  bool emitREXPrefix(int MemOperand, const MCInst &MI,
+                     const MCSubtargetInfo &STI, raw_ostream &OS) const;
 };
 
 } // end anonymous namespace
@@ -408,6 +409,12 @@ void X86MCCodeEmitter::emitMemModRMByte(const MCInst &MI, unsigned Op,
       switch (Opcode) {
       default:
         return X86::reloc_riprel_4byte;
+      case X86::MOV64rm:
+        // movq loads is a subset of reloc_riprel_4byte_relax_rex. It is a
+        // special case because COFF and Mach-O don't support ELF's more
+        // flexible R_X86_64_REX_GOTPCRELX relaxation.
+        assert(HasREX);
+        return X86::reloc_riprel_4byte_movq_load;
       case X86::ADC32rm:
       case X86::ADD32rm:
       case X86::AND32rm:
@@ -418,13 +425,6 @@ void X86MCCodeEmitter::emitMemModRMByte(const MCInst &MI, unsigned Op,
       case X86::SUB32rm:
       case X86::TEST32mr:
       case X86::XOR32rm:
-        return X86::reloc_riprel_4byte_relax;
-      case X86::MOV64rm:
-        // movq loads is a subset of reloc_riprel_4byte_relax_rex. It is a
-        // special case because COFF and Mach-O don't support ELF's more
-        // flexible R_X86_64_REX_GOTPCRELX relaxation.
-        assert(HasREX);
-        return X86::reloc_riprel_4byte_movq_load;
       case X86::CALL64m:
       case X86::JMP64m:
       case X86::TAILJMPm64:
@@ -799,7 +799,10 @@ void X86MCCodeEmitter::emitVEXOpcodePrefix(int MemOperand, const MCInst &MI,
   //  0b00001: implied 0F leading opcode
   //  0b00010: implied 0F 38 leading opcode bytes
   //  0b00011: implied 0F 3A leading opcode bytes
-  //  0b00100-0b11111: Reserved for future use
+  //  0b00100: Reserved for future use
+  //  0b00101: VEX MAP5
+  //  0b00110: VEX MAP6
+  //  0b00111-0b11111: Reserved for future use
   //  0b01000: XOP map select - 08h instructions with imm byte
   //  0b01001: XOP map select - 09h instructions with no imm byte
   //  0b01010: XOP map select - 0Ah instructions with imm dword
@@ -824,6 +827,12 @@ void X86MCCodeEmitter::emitVEXOpcodePrefix(int MemOperand, const MCInst &MI,
     break;
   case X86II::XOPA:
     VEX_5M = 0xA;
+    break;
+  case X86II::T_MAP5:
+    VEX_5M = 0x5;
+    break;
+  case X86II::T_MAP6:
+    VEX_5M = 0x6;
     break;
   }
 
@@ -1173,10 +1182,10 @@ void X86MCCodeEmitter::emitVEXOpcodePrefix(int MemOperand, const MCInst &MI,
     // EVEX opcode prefix can have 4 bytes
     //
     // +-----+ +--------------+ +-------------------+ +------------------------+
-    // | 62h | | RXBR' | 00mm | | W | vvvv | U | pp | | z | L'L | b | v' | aaa |
+    // | 62h | | RXBR' | 0mmm | | W | vvvv | U | pp | | z | L'L | b | v' | aaa |
     // +-----+ +--------------+ +-------------------+ +------------------------+
-    assert((VEX_5M & 0x3) == VEX_5M &&
-           "More than 2 significant bits in VEX.m-mmmm fields for EVEX!");
+    assert((VEX_5M & 0x7) == VEX_5M &&
+           "More than 3 significant bits in VEX.m-mmmm fields for EVEX!");
 
     emitByte(0x62, OS);
     emitByte((VEX_R << 7) | (VEX_X << 6) | (VEX_B << 5) | (EVEX_R2 << 4) |
@@ -1201,6 +1210,7 @@ void X86MCCodeEmitter::emitVEXOpcodePrefix(int MemOperand, const MCInst &MI,
 ///
 /// \returns true if REX prefix is used, otherwise returns false.
 bool X86MCCodeEmitter::emitREXPrefix(int MemOperand, const MCInst &MI,
+                                     const MCSubtargetInfo &STI,
                                      raw_ostream &OS) const {
   uint8_t REX = [&, MemOperand]() {
     uint8_t REX = 0;
@@ -1221,15 +1231,27 @@ bool X86MCCodeEmitter::emitREXPrefix(int MemOperand, const MCInst &MI,
     // If it accesses SPL, BPL, SIL, or DIL, then it requires a 0x40 REX prefix.
     for (unsigned i = CurOp; i != NumOps; ++i) {
       const MCOperand &MO = MI.getOperand(i);
-      if (!MO.isReg())
-        continue;
-      unsigned Reg = MO.getReg();
-      if (Reg == X86::AH || Reg == X86::BH || Reg == X86::CH || Reg == X86::DH)
-        UsesHighByteReg = true;
-      if (X86II::isX86_64NonExtLowByteReg(Reg))
-        // FIXME: The caller of determineREXPrefix slaps this prefix onto
-        // anything that returns non-zero.
-        REX |= 0x40; // REX fixed encoding prefix
+      if (MO.isReg()) {
+        unsigned Reg = MO.getReg();
+        if (Reg == X86::AH || Reg == X86::BH || Reg == X86::CH ||
+            Reg == X86::DH)
+          UsesHighByteReg = true;
+        if (X86II::isX86_64NonExtLowByteReg(Reg))
+          // FIXME: The caller of determineREXPrefix slaps this prefix onto
+          // anything that returns non-zero.
+          REX |= 0x40; // REX fixed encoding prefix
+      } else if (MO.isExpr() && STI.getTargetTriple().isX32()) {
+        // GOTTPOFF and TLSDESC relocations require a REX prefix to allow
+        // linker optimizations: even if the instructions we see may not require
+        // any prefix, they may be replaced by instructions that do. This is
+        // handled as a special case here so that it also works for hand-written
+        // assembly without the user needing to write REX, as with GNU as.
+        const auto *Ref = dyn_cast<MCSymbolRefExpr>(MO.getExpr());
+        if (Ref && (Ref->getKind() == MCSymbolRefExpr::VK_GOTTPOFF ||
+                    Ref->getKind() == MCSymbolRefExpr::VK_TLSDESC)) {
+          REX |= 0x40; // REX fixed encoding prefix
+        }
+      }
     }
 
     switch (TSFlags & X86II::FormMask) {
@@ -1352,7 +1374,7 @@ bool X86MCCodeEmitter::emitOpcodePrefix(int MemOperand, const MCInst &MI,
   assert((STI.hasFeature(X86::Mode64Bit) || !(TSFlags & X86II::REX_W)) &&
          "REX.W requires 64bit mode.");
   bool HasREX = STI.hasFeature(X86::Mode64Bit)
-                    ? emitREXPrefix(MemOperand, MI, OS)
+                    ? emitREXPrefix(MemOperand, MI, STI, OS)
                     : false;
 
   // 0x0F escape code must be emitted just before the opcode.

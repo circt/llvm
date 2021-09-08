@@ -133,9 +133,9 @@ struct Rounding {
 
 static constexpr Rounding defaultRounding;
 
-#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#if FLANG_BIG_ENDIAN
 constexpr bool isHostLittleEndian{false};
-#elif __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#elif FLANG_LITTLE_ENDIAN
 constexpr bool isHostLittleEndian{true};
 #else
 #error host endianness is not known
@@ -235,6 +235,7 @@ public:
   Rounding rounding() const { return rounding_; }
   bool flushSubnormalsToZero() const { return flushSubnormalsToZero_; }
   bool bigEndian() const { return bigEndian_; }
+  std::size_t maxAlignment() const { return maxAlignment_; }
   const semantics::DerivedTypeSpec *pdtInstance() const { return pdtInstance_; }
   const IntrinsicProcTable &intrinsics() const { return intrinsics_; }
 
@@ -257,7 +258,8 @@ private:
   const IntrinsicProcTable &intrinsics_;
   Rounding rounding_{defaultRounding};
   bool flushSubnormalsToZero_{false};
-  bool bigEndian_{false};
+  static constexpr bool bigEndian_{false}; // TODO: configure for target
+  static constexpr std::size_t maxAlignment_{8}; // TODO: configure for target
   const semantics::DerivedTypeSpec *pdtInstance_{nullptr};
   std::map<parser::CharBlock, ConstantSubscript> impliedDos_;
 };

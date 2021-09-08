@@ -45,6 +45,9 @@ public:
     llvm::StringRef open, close;
   };
 
+  /// Returns the underlying (unindented) raw_ostream.
+  raw_ostream &getOStream() const { return os; }
+
   /// Returns DelimitedScope.
   DelimitedScope scope(StringRef open = "", StringRef close = "") {
     return DelimitedScope(*this, open, close);
@@ -67,7 +70,7 @@ public:
     return *this;
   }
 
-  /// Emits whitespace and sets the indendation for the stream.
+  /// Emits whitespace and sets the indentation for the stream.
   raw_indented_ostream &indent(int with) {
     os.indent(with);
     atStartOfLine = false;

@@ -132,6 +132,10 @@ public:
                                const ScheduleDAG *DAG) const override;
 
   ScheduleHazardRecognizer *
+  CreateTargetMIHazardRecognizer(const InstrItineraryData *II,
+                                 const ScheduleDAGMI *DAG) const override;
+
+  ScheduleHazardRecognizer *
   CreateTargetPostRAHazardRecognizer(const InstrItineraryData *II,
                                      const ScheduleDAG *DAG) const override;
 
@@ -285,15 +289,15 @@ public:
   /// compares against in CmpValue. Return true if the comparison instruction
   /// can be analyzed.
   bool analyzeCompare(const MachineInstr &MI, Register &SrcReg,
-                      Register &SrcReg2, int &CmpMask,
-                      int &CmpValue) const override;
+                      Register &SrcReg2, int64_t &CmpMask,
+                      int64_t &CmpValue) const override;
 
   /// optimizeCompareInstr - Convert the instruction to set the zero flag so
   /// that we can remove a "comparison with zero"; Remove a redundant CMP
   /// instruction if the flags can be updated in the same way by an earlier
   /// instruction such as SUB.
   bool optimizeCompareInstr(MachineInstr &CmpInstr, Register SrcReg,
-                            Register SrcReg2, int CmpMask, int CmpValue,
+                            Register SrcReg2, int64_t CmpMask, int64_t CmpValue,
                             const MachineRegisterInfo *MRI) const override;
 
   bool analyzeSelect(const MachineInstr &MI,
@@ -362,7 +366,9 @@ public:
 
   bool isUnspillableTerminatorImpl(const MachineInstr *MI) const override {
     return MI->getOpcode() == ARM::t2LoopEndDec ||
-           MI->getOpcode() == ARM::t2DoLoopStartTP;
+           MI->getOpcode() == ARM::t2DoLoopStartTP ||
+           MI->getOpcode() == ARM::t2WhileLoopStartLR ||
+           MI->getOpcode() == ARM::t2WhileLoopStartTP;
   }
 
 private:
@@ -400,6 +406,16 @@ private:
   /// after the LR is was restored from a register.
   void emitCFIForLRRestoreFromReg(MachineBasicBlock &MBB,
                                   MachineBasicBlock::iterator It) const;
+  /// \brief Sets the offsets on outlined instructions in \p MBB which use SP
+  /// so that they will be valid post-outlining.
+  ///
+  /// \param MBB A \p MachineBasicBlock in an outlined function.
+  void fixupPostOutline(MachineBasicBlock &MBB) const;
+
+  /// Returns true if the machine instruction offset can handle the stack fixup
+  /// and updates it if requested.
+  bool checkAndUpdateStackOffset(MachineInstr *MI, int64_t Fixup,
+                                 bool Updt) const;
 
   unsigned getInstBundleLength(const MachineInstr &MI) const;
 
@@ -635,6 +651,67 @@ bool isIndirectBranchOpcode(int Opc) {
   return Opc == ARM::BX || Opc == ARM::MOVPCRX || Opc == ARM::tBRIND;
 }
 
+static inline bool isIndirectCall(const MachineInstr &MI) {
+  int Opc = MI.getOpcode();
+  switch (Opc) {
+    // indirect calls:
+  case ARM::BLX:
+  case ARM::BLX_noip:
+  case ARM::BLX_pred:
+  case ARM::BLX_pred_noip:
+  case ARM::BX_CALL:
+  case ARM::BMOVPCRX_CALL:
+  case ARM::TCRETURNri:
+  case ARM::TAILJMPr:
+  case ARM::TAILJMPr4:
+  case ARM::tBLXr:
+  case ARM::tBLXr_noip:
+  case ARM::tBLXNSr:
+  case ARM::tBLXNS_CALL:
+  case ARM::tBX_CALL:
+  case ARM::tTAILJMPr:
+    assert(MI.isCall(MachineInstr::IgnoreBundle));
+    return true;
+    // direct calls:
+  case ARM::BL:
+  case ARM::BL_pred:
+  case ARM::BMOVPCB_CALL:
+  case ARM::BL_PUSHLR:
+  case ARM::BLXi:
+  case ARM::TCRETURNdi:
+  case ARM::TAILJMPd:
+  case ARM::SVC:
+  case ARM::HVC:
+  case ARM::TPsoft:
+  case ARM::tTAILJMPd:
+  case ARM::t2SMC:
+  case ARM::t2HVC:
+  case ARM::tBL:
+  case ARM::tBLXi:
+  case ARM::tBL_PUSHLR:
+  case ARM::tTAILJMPdND:
+  case ARM::tSVC:
+  case ARM::tTPsoft:
+    assert(MI.isCall(MachineInstr::IgnoreBundle));
+    return false;
+  }
+  assert(!MI.isCall(MachineInstr::IgnoreBundle));
+  return false;
+}
+
+static inline bool isIndirectControlFlowNotComingBack(const MachineInstr &MI) {
+  int opc = MI.getOpcode();
+  return MI.isReturn() || isIndirectBranchOpcode(MI.getOpcode()) ||
+         isJumpTableBranchOpcode(opc);
+}
+
+static inline bool isSpeculationBarrierEndBBOpcode(int Opc) {
+  return Opc == ARM::SpeculationBarrierISBDSBEndBB ||
+         Opc == ARM::SpeculationBarrierSBEndBB ||
+         Opc == ARM::t2SpeculationBarrierISBDSBEndBB ||
+         Opc == ARM::t2SpeculationBarrierSBEndBB;
+}
+
 static inline bool isPopOpcode(int Opc) {
   return Opc == ARM::tPOP_RET || Opc == ARM::LDMIA_RET ||
          Opc == ARM::t2LDMIA_RET || Opc == ARM::tPOP || Opc == ARM::LDMIA_UPD ||
@@ -808,8 +885,12 @@ inline bool isLegalAddressImm(unsigned Opcode, int Imm,
     return std::abs(Imm) < (((1 << 7) * 4) - 1) && Imm % 4 == 0;
   case ARMII::AddrModeT2_i8:
     return std::abs(Imm) < (((1 << 8) * 1) - 1);
+  case ARMII::AddrMode2:
+    return std::abs(Imm) < (((1 << 12) * 1) - 1);
   case ARMII::AddrModeT2_i12:
     return Imm >= 0 && Imm < (((1 << 12) * 1) - 1);
+  case ARMII::AddrModeT2_i8s4:
+    return std::abs(Imm) < (((1 << 8) * 4) - 1) && Imm % 4 == 0;
   default:
     llvm_unreachable("Unhandled Addressing mode");
   }
@@ -849,6 +930,10 @@ inline bool isGatherScatter(IntrinsicInst *IntInst) {
     return false;
   return isGather(IntInst) || isScatter(IntInst);
 }
+
+unsigned getBLXOpcode(const MachineFunction &MF);
+unsigned gettBLXrOpcode(const MachineFunction &MF);
+unsigned getBLXpredOpcode(const MachineFunction &MF);
 
 } // end namespace llvm
 

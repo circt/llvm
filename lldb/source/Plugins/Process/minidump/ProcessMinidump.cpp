@@ -138,10 +138,10 @@ private:
 ///
 /// \param[in] module_sp The module to grab the .text section from.
 ///
-/// \param[in/out] breakpad_uuid A vector that will receive the calculated
+/// \param[in,out] breakpad_uuid A vector that will receive the calculated
 ///                breakpad .text hash.
 ///
-/// \param[in/out] facebook_uuid A vector that will receive the calculated
+/// \param[in,out] facebook_uuid A vector that will receive the calculated
 ///                facebook .text hash.
 ///
 void HashElfTextSection(ModuleSP module_sp, std::vector<uint8_t> &breakpad_uuid,
@@ -462,8 +462,8 @@ Status ProcessMinidump::GetMemoryRegions(MemoryRegionInfos &region_list) {
 
 void ProcessMinidump::Clear() { Process::m_thread_list.Clear(); }
 
-bool ProcessMinidump::UpdateThreadList(ThreadList &old_thread_list,
-                                       ThreadList &new_thread_list) {
+bool ProcessMinidump::DoUpdateThreadList(ThreadList &old_thread_list,
+                                         ThreadList &new_thread_list) {
   for (const minidump::Thread &thread : m_thread_list) {
     LocationDescriptor context_location = thread.Context;
 
@@ -548,7 +548,7 @@ void ProcessMinidump::ReadModuleList() {
 
     // check if the process is wow64 - a 32 bit windows process running on a
     // 64 bit windows
-    if (llvm::StringRef(name).endswith_lower("wow64.dll")) {
+    if (llvm::StringRef(name).endswith_insensitive("wow64.dll")) {
       m_is_wow64 = true;
     }
 
@@ -871,7 +871,7 @@ public:
     m_option_group.Finalize();
   }
 
-  ~CommandObjectProcessMinidumpDump() override {}
+  ~CommandObjectProcessMinidumpDump() override = default;
 
   Options *GetOptions() override { return &m_option_group; }
 
@@ -880,7 +880,6 @@ public:
     if (argc > 0) {
       result.AppendErrorWithFormat("'%s' take no arguments, only options",
                                    m_cmd_name.c_str());
-      result.SetStatus(eReturnStatusFailed);
       return false;
     }
     SetDefaultOptionsIfNoneAreSet();
@@ -1001,7 +1000,7 @@ public:
         CommandObjectSP(new CommandObjectProcessMinidumpDump(interpreter)));
   }
 
-  ~CommandObjectMultiwordProcessMinidump() override {}
+  ~CommandObjectMultiwordProcessMinidump() override = default;
 };
 
 CommandObject *ProcessMinidump::GetPluginCommandObject() {

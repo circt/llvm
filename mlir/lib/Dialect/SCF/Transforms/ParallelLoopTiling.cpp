@@ -15,6 +15,7 @@
 #include "mlir/Dialect/SCF/Passes.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/SCF/Transforms.h"
+#include "mlir/Dialect/SCF/Utils.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 
 using namespace mlir;
@@ -32,11 +33,25 @@ using namespace mlir::scf;
 ///                                          min(%arg5*tileSize[1], %arg3-%i1))
 ///                                      step (%arg4, %arg5)
 ///
+/// or, when no-min-max-bounds is true, into
+///   scf.parallel (%i0, %i1) = (%arg0, %arg1) to (%arg2, %arg3)
+///                                            step (%arg4*tileSize[0],
+///                                                  %arg5*tileSize[1])
+///     scf.parallel (%j0, %j1) = (0, 0) to (%arg4*tileSize[0],
+///                                          %arg5*tileSize[1])
+///                                      step (%arg4, %arg5)
+///        %inbound = (%j0 * %arg4 + %i0 < %arg2) &&
+///                   (%j1 * %arg5 + %i1 < %arg3)
+///        scf.if (%inbound)
+///          ....
+///
 /// where the uses of %i0 and %i1 in the loop body are replaced by
 /// %i0 + j0 and %i1 + %j1.
 //
 /// The old loop is replaced with the new one.
-void mlir::scf::tileParallelLoop(ParallelOp op, ArrayRef<int64_t> tileSizes) {
+std::pair<ParallelOp, ParallelOp>
+mlir::scf::tileParallelLoop(ParallelOp op, ArrayRef<int64_t> tileSizes,
+                            bool noMinMaxBounds) {
   OpBuilder b(op);
   auto zero = b.create<ConstantIndexOp>(op.getLoc(), 0);
   SmallVector<Value, 2> tileSizeConstants;
@@ -62,8 +77,6 @@ void mlir::scf::tileParallelLoop(ParallelOp op, ArrayRef<int64_t> tileSizes) {
   b.setInsertionPointToStart(outerLoop.getBody());
 
   // Compute min(size, dim - offset) to avoid out-of-bounds accesses.
-  // FIXME: Instead of using min, we want to replicate the tail. This would give
-  // the inner loop constant bounds for easy vectorization.
   auto minMap = AffineMap::get(
       /*dimCount=*/3, /*symbolCount=*/0,
       {getAffineDimExpr(/*position=*/0, b.getContext()),
@@ -74,6 +87,7 @@ void mlir::scf::tileParallelLoop(ParallelOp op, ArrayRef<int64_t> tileSizes) {
   // Create the inner loop with adjusted bounds.
   SmallVector<Value, 2> newBounds;
   newBounds.reserve(op.upperBound().size());
+  bool needInboundCheck = false;
   for (auto dim : llvm::zip(outerLoop.lowerBound(), outerLoop.upperBound(),
                             outerLoop.step(), outerLoop.getInductionVars(),
                             op.step(), tileSizeConstants)) {
@@ -99,6 +113,14 @@ void mlir::scf::tileParallelLoop(ParallelOp op, ArrayRef<int64_t> tileSizes) {
         continue;
       }
     }
+
+    // For InboundCheck mode, just use the variable outer step
+    if (noMinMaxBounds) {
+      newBounds.push_back(newStep);
+      needInboundCheck = true;
+      continue;
+    }
+
     // Otherwise, we dynamically compute the bound for
     // each iteration of the outer loop.
     newBounds.push_back(
@@ -109,67 +131,81 @@ void mlir::scf::tileParallelLoop(ParallelOp op, ArrayRef<int64_t> tileSizes) {
       op.getLoc(), SmallVector<Value, 2>(newBounds.size(), zero), newBounds,
       op.step());
 
-  // Steal the body of the old parallel loop and erase it.
-  innerLoop.region().takeBody(op.region());
-
-  // Insert computation for new index vectors and replace uses.
-  b.setInsertionPointToStart(innerLoop.getBody());
-  for (auto ivs :
-       llvm::zip(innerLoop.getInductionVars(), outerLoop.getInductionVars())) {
-    Value inner_index = std::get<0>(ivs);
-    AddIOp newIndex =
-        b.create<AddIOp>(op.getLoc(), std::get<0>(ivs), std::get<1>(ivs));
-    inner_index.replaceAllUsesExcept(
-        newIndex, SmallPtrSet<Operation *, 1>{newIndex.getOperation()});
+  if (noMinMaxBounds && needInboundCheck) {
+    b.setInsertionPointToStart(innerLoop.getBody());
+    // Insert in-bound check
+    Value inbound =
+        b.create<ConstantOp>(op.getLoc(), b.getIntegerType(1),
+                             b.getIntegerAttr(b.getIntegerType(1), 1));
+    for (auto dim :
+         llvm::zip(outerLoop.upperBound(), outerLoop.getInductionVars(),
+                   innerLoop.getInductionVars(), innerLoop.step())) {
+      Value outerUpperBound, outerIV, innerIV, innerStep;
+      std::tie(outerUpperBound, outerIV, innerIV, innerStep) = dim;
+      // %in_bound = %in_bound &&
+      //             (%inner_iv * %inner_step + %outer_iv < %outer_upper_bound)
+      Value index = b.create<AddIOp>(
+          op.getLoc(), b.create<MulIOp>(op.getLoc(), innerIV, innerStep),
+          outerIV);
+      Value dimInbound = b.create<CmpIOp>(op.getLoc(), CmpIPredicate::ult,
+                                          index, outerUpperBound);
+      inbound = b.create<AndOp>(op.getLoc(), inbound, dimInbound);
+    }
+    auto ifInbound = b.create<IfOp>(op.getLoc(),
+                                    /*resultTypes*/ ArrayRef<Type>{}, inbound,
+                                    /*hasElseRegion*/ false);
+    ifInbound.thenRegion().takeBody(op.region());
+    Block &thenBlock = ifInbound.thenRegion().front();
+    b.setInsertionPointToStart(innerLoop.getBody());
+    for (auto ivs : llvm::enumerate(llvm::zip(innerLoop.getInductionVars(),
+                                              outerLoop.getInductionVars()))) {
+      AddIOp newIndex = b.create<AddIOp>(op.getLoc(), std::get<0>(ivs.value()),
+                                         std::get<1>(ivs.value()));
+      thenBlock.getArgument(ivs.index())
+          .replaceAllUsesExcept(newIndex, newIndex);
+    }
+    thenBlock.eraseArguments(llvm::to_vector<4>(
+        llvm::seq((unsigned)0, thenBlock.getNumArguments())));
+  } else {
+    innerLoop.region().takeBody(op.region());
+    b.setInsertionPointToStart(innerLoop.getBody());
+    for (auto ivs : llvm::zip(innerLoop.getInductionVars(),
+                              outerLoop.getInductionVars())) {
+      Value innerIndex = std::get<0>(ivs);
+      AddIOp newIndex =
+          b.create<AddIOp>(op.getLoc(), std::get<0>(ivs), std::get<1>(ivs));
+      innerIndex.replaceAllUsesExcept(newIndex, newIndex);
+    }
   }
 
   op.erase();
-}
-
-/// Get a list of most nested parallel loops.
-static bool getInnermostPloops(Operation *rootOp,
-                               SmallVectorImpl<ParallelOp> &result) {
-  assert(rootOp != nullptr && "Root operation must not be a nullptr.");
-  bool rootEnclosesPloops = false;
-  for (Region &region : rootOp->getRegions()) {
-    for (Block &block : region.getBlocks()) {
-      for (Operation &op : block) {
-        bool enclosesPloops = getInnermostPloops(&op, result);
-        rootEnclosesPloops |= enclosesPloops;
-        if (auto ploop = dyn_cast<ParallelOp>(op)) {
-          rootEnclosesPloops = true;
-
-          // Collect ploop if it is an innermost one.
-          if (!enclosesPloops)
-            result.push_back(ploop);
-        }
-      }
-    }
-  }
-  return rootEnclosesPloops;
+  return std::make_pair(outerLoop, innerLoop);
 }
 
 namespace {
 struct ParallelLoopTiling
     : public SCFParallelLoopTilingBase<ParallelLoopTiling> {
   ParallelLoopTiling() = default;
-  explicit ParallelLoopTiling(ArrayRef<int64_t> tileSizes) {
+  explicit ParallelLoopTiling(ArrayRef<int64_t> tileSizes,
+                              bool noMinMaxBounds = false) {
     this->tileSizes = tileSizes;
+    this->noMinMaxBounds = noMinMaxBounds;
   }
 
   void runOnFunction() override {
     SmallVector<ParallelOp, 2> innermostPloops;
-    getInnermostPloops(getFunction().getOperation(), innermostPloops);
+    getInnermostParallelLoops(getFunction().getOperation(), innermostPloops);
     for (ParallelOp ploop : innermostPloops) {
       // FIXME: Add reduction support.
       if (ploop.getNumReductions() == 0)
-        tileParallelLoop(ploop, tileSizes);
+        tileParallelLoop(ploop, tileSizes, noMinMaxBounds);
     }
   }
 };
 } // namespace
 
 std::unique_ptr<Pass>
-mlir::createParallelLoopTilingPass(ArrayRef<int64_t> tileSizes) {
-  return std::make_unique<ParallelLoopTiling>(tileSizes);
+mlir::createParallelLoopTilingPass(ArrayRef<int64_t> tileSizes,
+                                   bool noMinMaxBounds) {
+  return std::make_unique<ParallelLoopTiling>(tileSizes, noMinMaxBounds);
 }

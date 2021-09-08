@@ -73,10 +73,6 @@ static cl::opt<unsigned> UnrollForcePeelCount(
     "unroll-force-peel-count", cl::init(0), cl::Hidden,
     cl::desc("Force a peel count regardless of profiling information."));
 
-static cl::opt<bool> UnrollPeelMultiDeoptExit(
-    "unroll-peel-multi-deopt-exit", cl::init(true), cl::Hidden,
-    cl::desc("Allow peeling of loops with multiple deopt exits."));
-
 static const char *PeeledCountMetaData = "llvm.loop.peeled.count";
 
 // Designates that a Phi is estimated to become invariant after an "infinite"
@@ -91,34 +87,31 @@ bool llvm::canPeel(Loop *L) {
   if (!L->isLoopSimplifyForm())
     return false;
 
-  if (UnrollPeelMultiDeoptExit) {
-    SmallVector<BasicBlock *, 4> Exits;
-    L->getUniqueNonLatchExitBlocks(Exits);
-
-    if (!Exits.empty()) {
-      // Latch's terminator is a conditional branch, Latch is exiting and
-      // all non Latch exits ends up with deoptimize.
-      const BasicBlock *Latch = L->getLoopLatch();
-      const BranchInst *T = dyn_cast<BranchInst>(Latch->getTerminator());
-      return T && T->isConditional() && L->isLoopExiting(Latch) &&
-             all_of(Exits, [](const BasicBlock *BB) {
-               return BB->getTerminatingDeoptimizeCall();
-             });
-    }
-  }
-
-  // Only peel loops that contain a single exit
-  if (!L->getExitingBlock() || !L->getUniqueExitBlock())
-    return false;
-
   // Don't try to peel loops where the latch is not the exiting block.
   // This can be an indication of two different things:
   // 1) The loop is not rotated.
   // 2) The loop contains irreducible control flow that involves the latch.
-  if (L->getLoopLatch() != L->getExitingBlock())
+  const BasicBlock *Latch = L->getLoopLatch();
+  if (!L->isLoopExiting(Latch))
     return false;
 
-  return true;
+  // Peeling is only supported if the latch is a branch.
+  if (!isa<BranchInst>(Latch->getTerminator()))
+    return false;
+
+  SmallVector<BasicBlock *, 4> Exits;
+  L->getUniqueNonLatchExitBlocks(Exits);
+  // The latch must either be the only exiting block or all non-latch exit
+  // blocks have either a deopt or unreachable terminator. Both deopt and
+  // unreachable terminators are a strong indication they are not taken. Note
+  // that this is a profitability check, not a legality check. Also note that
+  // LoopPeeling currently can only update the branch weights of latch blocks
+  // and branch weights to blocks with deopt or unreachable do not need
+  // updating.
+  return all_of(Exits, [](const BasicBlock *BB) {
+    return BB->getTerminatingDeoptimizeCall() ||
+           isa<UnreachableInst>(BB->getTerminator());
+  });
 }
 
 // This function calculates the number of iterations after which the given Phi
@@ -206,9 +199,7 @@ static unsigned countToEliminateCompares(Loop &L, unsigned MaxPeelCount,
 
     // Do not consider predicates that are known to be true or false
     // independently of the loop iteration.
-    if (SE.isKnownPredicate(Pred, LeftSCEV, RightSCEV) ||
-        SE.isKnownPredicate(ICmpInst::getInversePredicate(Pred), LeftSCEV,
-                            RightSCEV))
+    if (SE.evaluatePredicate(Pred, LeftSCEV, RightSCEV))
       continue;
 
     // Check if we have a condition with one AddRec and one non AddRec
@@ -504,7 +495,7 @@ static void cloneLoopBlocks(
     SmallVectorImpl<std::pair<BasicBlock *, BasicBlock *>> &ExitEdges,
     SmallVectorImpl<BasicBlock *> &NewBlocks, LoopBlocksDFS &LoopBlocks,
     ValueToValueMapTy &VMap, ValueToValueMapTy &LVMap, DominatorTree *DT,
-    LoopInfo *LI) {
+    LoopInfo *LI, ArrayRef<MDNode *> LoopLocalNoAliasDeclScopes) {
   BasicBlock *Header = L->getHeader();
   BasicBlock *Latch = L->getLoopLatch();
   BasicBlock *PreHeader = L->getLoopPreheader();
@@ -538,6 +529,15 @@ static void cloneLoopBlocks(
         DT->addNewBlock(NewBB, cast<BasicBlock>(VMap[IDom->getBlock()]));
       }
     }
+  }
+
+  {
+    // Identify what other metadata depends on the cloned version. After
+    // cloning, replace the metadata with the corrected version for both
+    // memory instructions and noalias intrinsics.
+    std::string Ext = (Twine("Peel") + Twine(IterNumber)).str();
+    cloneAndAdaptNoAliasScopes(LoopLocalNoAliasDeclScopes, NewBlocks,
+                               Header->getContext(), Ext);
   }
 
   // Recursively create the new Loop objects for nested loops, if any,
@@ -764,13 +764,19 @@ bool llvm::peelLoop(Loop *L, unsigned PeelCount, LoopInfo *LI,
   uint64_t ExitWeight = 0, FallThroughWeight = 0;
   initBranchWeights(Header, LatchBR, ExitWeight, FallThroughWeight);
 
+  // Identify what noalias metadata is inside the loop: if it is inside the
+  // loop, the associated metadata must be cloned for each iteration.
+  SmallVector<MDNode *, 6> LoopLocalNoAliasDeclScopes;
+  identifyNoAliasScopesToClone(L->getBlocks(), LoopLocalNoAliasDeclScopes);
+
   // For each peeled-off iteration, make a copy of the loop.
   for (unsigned Iter = 0; Iter < PeelCount; ++Iter) {
     SmallVector<BasicBlock *, 8> NewBlocks;
     ValueToValueMapTy VMap;
 
     cloneLoopBlocks(L, Iter, InsertTop, InsertBot, ExitEdges, NewBlocks,
-                    LoopBlocks, VMap, LVMap, DT, LI);
+                    LoopBlocks, VMap, LVMap, DT, LI,
+                    LoopLocalNoAliasDeclScopes);
 
     // Remap to use values from the current iteration instead of the
     // previous one.

@@ -27,17 +27,14 @@
 //===----------------------------------------------------------------------===//
 
 #include "AMDGPU.h"
-#include "AMDGPUSubtarget.h"
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "Utils/AMDGPUBaseInfo.h"
 #include "llvm/ADT/SmallSet.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/Module.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/Utils/Cloning.h"
-#include <string>
 
 #define DEBUG_TYPE "amdgpu-propagate-attributes"
 
@@ -252,7 +249,11 @@ bool AMDGPUPropagateAttributes::process() {
         if (!I)
           continue;
         CallBase *CI = dyn_cast<CallBase>(I);
-        if (!CI)
+        // Only propagate attributes if F is the called function. Specifically,
+        // do not propagate attributes if F is passed as an argument.
+        // FIXME: handle bitcasted callee, e.g.
+        // %retval = call i8* bitcast (i32* ()* @f to i8* ()*)()
+        if (!CI || CI->getCalledOperand() != &F)
           continue;
         Function *Caller = CI->getCaller();
         if (!Caller || !Visited.insert(CI).second)
@@ -408,4 +409,22 @@ FunctionPass
 ModulePass
 *llvm::createAMDGPUPropagateAttributesLatePass(const TargetMachine *TM) {
   return new AMDGPUPropagateAttributesLate(TM);
+}
+
+PreservedAnalyses
+AMDGPUPropagateAttributesEarlyPass::run(Function &F,
+                                        FunctionAnalysisManager &AM) {
+  if (!AMDGPU::isEntryFunctionCC(F.getCallingConv()))
+    return PreservedAnalyses::all();
+
+  return AMDGPUPropagateAttributes(&TM, false).process(F)
+             ? PreservedAnalyses::none()
+             : PreservedAnalyses::all();
+}
+
+PreservedAnalyses
+AMDGPUPropagateAttributesLatePass::run(Module &M, ModuleAnalysisManager &AM) {
+  return AMDGPUPropagateAttributes(&TM, true).process(M)
+             ? PreservedAnalyses::none()
+             : PreservedAnalyses::all();
 }

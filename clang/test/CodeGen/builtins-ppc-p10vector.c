@@ -732,36 +732,36 @@ vector unsigned long long test_xxgenpcvdm(void) {
   return vec_genpcvm(vulla, 0);
 }
 
-vector signed char test_vec_vclrl_sc(void) {
+vector signed char test_vec_clr_first_sc(void) {
   // CHECK-BE: @llvm.ppc.altivec.vclrlb(<16 x i8>
   // CHECK-BE-NEXT: ret <16 x i8>
   // CHECK-LE: @llvm.ppc.altivec.vclrrb(<16 x i8>
   // CHECK-LE-NEXT: ret <16 x i8>
-  return vec_clrl(vsca, uia);
+  return vec_clr_first(vsca, uia);
 }
 
-vector unsigned char test_vec_clrl_uc(void) {
+vector unsigned char test_vec_clr_first_uc(void) {
   // CHECK-BE: @llvm.ppc.altivec.vclrlb(<16 x i8>
   // CHECK-BE-NEXT: ret <16 x i8>
   // CHECK-LE: @llvm.ppc.altivec.vclrrb(<16 x i8>
   // CHECK-LE-NEXT: ret <16 x i8>
-  return vec_clrl(vuca, uia);
+  return vec_clr_first(vuca, uia);
 }
 
-vector signed char test_vec_vclrr_sc(void) {
+vector signed char test_vec_clr_last_sc(void) {
   // CHECK-BE: @llvm.ppc.altivec.vclrrb(<16 x i8>
   // CHECK-BE-NEXT: ret <16 x i8>
   // CHECK-LE: @llvm.ppc.altivec.vclrlb(<16 x i8>
   // CHECK-LE-NEXT: ret <16 x i8>
-  return vec_clrr(vsca, uia);
+  return vec_clr_last(vsca, uia);
 }
 
-vector unsigned char test_vec_clrr_uc(void) {
+vector unsigned char test_vec_clr_last_uc(void) {
   // CHECK-BE: @llvm.ppc.altivec.vclrrb(<16 x i8>
   // CHECK-BE-NEXT: ret <16 x i8>
   // CHECK-LE: @llvm.ppc.altivec.vclrlb(<16 x i8>
   // CHECK-LE-NEXT: ret <16 x i8>
-  return vec_clrr(vuca, uia);
+  return vec_clr_last(vuca, uia);
 }
 
 vector unsigned long long test_vclzdm(void) {
@@ -1359,12 +1359,12 @@ vector float test_vec_vec_splati_f(void) {
 
 vector double test_vec_vec_splatid(void) {
   // CHECK-BE: [[T1:%.+]] = fpext float %{{.+}} to double
-  // CHECK-BE-NEXT: [[T2:%.+]] = insertelement <2 x double> undef, double [[T1:%.+]], i32 0
-  // CHECK-BE-NEXT: [[T3:%.+]] = shufflevector <2 x double> [[T2:%.+]], <2 x double> undef, <2 x i32> zeroinitialize
+  // CHECK-BE-NEXT: [[T2:%.+]] = insertelement <2 x double> poison, double [[T1:%.+]], i32 0
+  // CHECK-BE-NEXT: [[T3:%.+]] = shufflevector <2 x double> [[T2:%.+]], <2 x double> poison, <2 x i32> zeroinitialize
   // CHECK-BE-NEXT: ret <2 x double> [[T3:%.+]]
   // CHECK-LE: [[T1:%.+]] = fpext float %{{.+}} to double
-  // CHECK-LE-NEXT: [[T2:%.+]] = insertelement <2 x double> undef, double [[T1:%.+]], i32 0
-  // CHECK-LE-NEXT: [[T3:%.+]] = shufflevector <2 x double> [[T2:%.+]], <2 x double> undef, <2 x i32> zeroinitialize
+  // CHECK-LE-NEXT: [[T2:%.+]] = insertelement <2 x double> poison, double [[T1:%.+]], i32 0
+  // CHECK-LE-NEXT: [[T3:%.+]] = shufflevector <2 x double> [[T2:%.+]], <2 x double> poison, <2 x i32> zeroinitialize
   // CHECK-LE-NEXT: ret <2 x double> [[T3:%.+]]
   return vec_splatid(1.0);
 }

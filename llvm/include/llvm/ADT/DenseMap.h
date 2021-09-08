@@ -924,6 +924,9 @@ public:
     this->insert(I, E);
   }
 
+  SmallDenseMap(std::initializer_list<typename BaseT::value_type> Vals)
+      : SmallDenseMap(Vals.begin(), Vals.end()) {}
+
   ~SmallDenseMap() {
     this->destroyAll();
     deallocateBuckets();
@@ -1242,22 +1245,18 @@ public:
     return Ptr;
   }
 
-  template <typename T>
-  bool operator==(const T &RHS) const {
-    assert((!Ptr || isHandleInSync()) && "handle not in sync!");
+  friend bool operator==(const DenseMapIterator &LHS,
+                         const DenseMapIterator &RHS) {
+    assert((!LHS.Ptr || LHS.isHandleInSync()) && "handle not in sync!");
     assert((!RHS.Ptr || RHS.isHandleInSync()) && "handle not in sync!");
-    assert(getEpochAddress() == RHS.getEpochAddress() &&
+    assert(LHS.getEpochAddress() == RHS.getEpochAddress() &&
            "comparing incomparable iterators!");
-    return Ptr == RHS.Ptr;
+    return LHS.Ptr == RHS.Ptr;
   }
 
-  template <typename T>
-  bool operator!=(const T &RHS) const {
-    assert((!Ptr || isHandleInSync()) && "handle not in sync!");
-    assert((!RHS.Ptr || RHS.isHandleInSync()) && "handle not in sync!");
-    assert(getEpochAddress() == RHS.getEpochAddress() &&
-           "comparing incomparable iterators!");
-    return Ptr != RHS.Ptr;
+  friend bool operator!=(const DenseMapIterator &LHS,
+                         const DenseMapIterator &RHS) {
+    return !(LHS == RHS);
   }
 
   inline DenseMapIterator& operator++() {  // Preincrement

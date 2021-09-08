@@ -1293,7 +1293,6 @@ void ARMAsmPrinter::emitInstruction(const MachineInstr *MI) {
 
   const MachineFunction &MF = *MI->getParent()->getParent();
   const ARMSubtarget &STI = MF.getSubtarget<ARMSubtarget>();
-  unsigned FramePtr = STI.useR7AsFramePointer() ? ARM::R7 : ARM::R11;
 
   // If we just ended a constant pool, mark it as such.
   if (InConstantPool && MI->getOpcode() != ARM::CONSTPOOL_ENTRY) {
@@ -1743,7 +1742,7 @@ void ARMAsmPrinter::emitInstruction(const MachineInstr *MI) {
       // FIXME: Ideally we could vary the LDRB index based on the padding
       // between the sequence and jump table, however that relies on MCExprs
       // for load indexes which are currently not supported.
-      OutStreamer->emitCodeAlignment(4);
+      OutStreamer->emitCodeAlignment(4, &getSubtargetInfo());
       EmitToStreamer(*OutStreamer, MCInstBuilder(ARM::tADDhirr)
                                        .addReg(Idx)
                                        .addReg(Idx)
@@ -1897,7 +1896,7 @@ void ARMAsmPrinter::emitInstruction(const MachineInstr *MI) {
     // LSJLJEH:
     Register SrcReg = MI->getOperand(0).getReg();
     Register ValReg = MI->getOperand(1).getReg();
-    MCSymbol *Label = OutContext.createTempSymbol("SJLJEH", false, true);
+    MCSymbol *Label = OutContext.createTempSymbol("SJLJEH");
     OutStreamer->AddComment("eh_setjmp begin");
     EmitToStreamer(*OutStreamer, MCInstBuilder(ARM::tMOVr)
       .addReg(ValReg)
@@ -2039,12 +2038,12 @@ void ARMAsmPrinter::emitInstruction(const MachineInstr *MI) {
     if (STI.isTargetDarwin() || STI.isTargetWindows()) {
       // These platforms always use the same frame register
       EmitToStreamer(*OutStreamer, MCInstBuilder(ARM::LDRi12)
-        .addReg(FramePtr)
-        .addReg(SrcReg)
-        .addImm(0)
-        // Predicate.
-        .addImm(ARMCC::AL)
-        .addReg(0));
+                                       .addReg(STI.getFramePointerReg())
+                                       .addReg(SrcReg)
+                                       .addImm(0)
+                                       // Predicate.
+                                       .addImm(ARMCC::AL)
+                                       .addReg(0));
     } else {
       // If the calling code might use either R7 or R11 as
       // frame pointer register, restore it into both.
@@ -2109,12 +2108,12 @@ void ARMAsmPrinter::emitInstruction(const MachineInstr *MI) {
     if (STI.isTargetDarwin() || STI.isTargetWindows()) {
       // These platforms always use the same frame register
       EmitToStreamer(*OutStreamer, MCInstBuilder(ARM::tLDRi)
-        .addReg(FramePtr)
-        .addReg(SrcReg)
-        .addImm(0)
-        // Predicate.
-        .addImm(ARMCC::AL)
-        .addReg(0));
+                                       .addReg(STI.getFramePointerReg())
+                                       .addReg(SrcReg)
+                                       .addImm(0)
+                                       // Predicate.
+                                       .addImm(ARMCC::AL)
+                                       .addReg(0));
     } else {
       // If the calling code might use either R7 or R11 as
       // frame pointer register, restore it into both.
@@ -2180,6 +2179,48 @@ void ARMAsmPrinter::emitInstruction(const MachineInstr *MI) {
   case ARM::PATCHABLE_TAIL_CALL:
     LowerPATCHABLE_TAIL_CALL(*MI);
     return;
+  case ARM::SpeculationBarrierISBDSBEndBB: {
+    // Print DSB SYS + ISB
+    MCInst TmpInstDSB;
+    TmpInstDSB.setOpcode(ARM::DSB);
+    TmpInstDSB.addOperand(MCOperand::createImm(0xf));
+    EmitToStreamer(*OutStreamer, TmpInstDSB);
+    MCInst TmpInstISB;
+    TmpInstISB.setOpcode(ARM::ISB);
+    TmpInstISB.addOperand(MCOperand::createImm(0xf));
+    EmitToStreamer(*OutStreamer, TmpInstISB);
+    return;
+  }
+  case ARM::t2SpeculationBarrierISBDSBEndBB: {
+    // Print DSB SYS + ISB
+    MCInst TmpInstDSB;
+    TmpInstDSB.setOpcode(ARM::t2DSB);
+    TmpInstDSB.addOperand(MCOperand::createImm(0xf));
+    TmpInstDSB.addOperand(MCOperand::createImm(ARMCC::AL));
+    TmpInstDSB.addOperand(MCOperand::createReg(0));
+    EmitToStreamer(*OutStreamer, TmpInstDSB);
+    MCInst TmpInstISB;
+    TmpInstISB.setOpcode(ARM::t2ISB);
+    TmpInstISB.addOperand(MCOperand::createImm(0xf));
+    TmpInstISB.addOperand(MCOperand::createImm(ARMCC::AL));
+    TmpInstISB.addOperand(MCOperand::createReg(0));
+    EmitToStreamer(*OutStreamer, TmpInstISB);
+    return;
+  }
+  case ARM::SpeculationBarrierSBEndBB: {
+    // Print SB
+    MCInst TmpInstSB;
+    TmpInstSB.setOpcode(ARM::SB);
+    EmitToStreamer(*OutStreamer, TmpInstSB);
+    return;
+  }
+  case ARM::t2SpeculationBarrierSBEndBB: {
+    // Print SB
+    MCInst TmpInstSB;
+    TmpInstSB.setOpcode(ARM::t2SB);
+    EmitToStreamer(*OutStreamer, TmpInstSB);
+    return;
+  }
   }
 
   MCInst TmpInst;

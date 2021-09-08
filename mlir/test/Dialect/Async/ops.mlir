@@ -122,8 +122,10 @@ func @await_value(%arg0: !async.value<f32>) -> f32 {
 }
 
 // CHECK-LABEL: @create_group_and_await_all
-func @create_group_and_await_all(%arg0: !async.token, %arg1: !async.value<f32>) -> index {
-  %0 = async.create_group
+func @create_group_and_await_all(%arg0: !async.token,
+                                 %arg1: !async.value<f32>) -> index {
+  %c = constant 2 : index
+  %0 = async.create_group %c : !async.group
 
   // CHECK: async.add_to_group %arg0
   // CHECK: async.add_to_group %arg1
@@ -133,18 +135,4 @@ func @create_group_and_await_all(%arg0: !async.token, %arg1: !async.value<f32>) 
 
   %3 = addi %1, %2 : index
   return %3 : index
-}
-
-// CHECK-LABEL: @add_ref
-func @add_ref(%arg0: !async.token) {
-  // CHECK: async.add_ref %arg0 {count = 1 : i32}
-  async.add_ref %arg0 {count = 1 : i32} : !async.token
-  return
-}
-
-// CHECK-LABEL: @drop_ref
-func @drop_ref(%arg0: !async.token) {
-  // CHECK: async.drop_ref %arg0 {count = 1 : i32}
-  async.drop_ref %arg0 {count = 1 : i32} : !async.token
-  return
 }

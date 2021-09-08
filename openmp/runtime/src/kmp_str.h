@@ -46,10 +46,10 @@ typedef struct kmp_str_buf kmp_str_buf_t;
   }
 
 void __kmp_str_buf_clear(kmp_str_buf_t *buffer);
-void __kmp_str_buf_reserve(kmp_str_buf_t *buffer, int size);
+void __kmp_str_buf_reserve(kmp_str_buf_t *buffer, size_t size);
 void __kmp_str_buf_detach(kmp_str_buf_t *buffer);
 void __kmp_str_buf_free(kmp_str_buf_t *buffer);
-void __kmp_str_buf_cat(kmp_str_buf_t *buffer, char const *str, int len);
+void __kmp_str_buf_cat(kmp_str_buf_t *buffer, char const *str, size_t len);
 void __kmp_str_buf_catbuf(kmp_str_buf_t *dest, const kmp_str_buf_t *src);
 int __kmp_str_buf_vprint(kmp_str_buf_t *buffer, char const *format,
                          va_list args);
@@ -106,6 +106,7 @@ int __kmp_str_eqf(char const *lhs, char const *rhs);
 char *__kmp_str_format(char const *format, ...);
 void __kmp_str_free(char **str);
 int __kmp_str_match(char const *target, int len, char const *data);
+bool __kmp_str_contains(char const *target, int len, char const *data);
 int __kmp_str_match_false(char const *data);
 int __kmp_str_match_true(char const *data);
 void __kmp_str_replace(char *str, char search_for, char replace_with);

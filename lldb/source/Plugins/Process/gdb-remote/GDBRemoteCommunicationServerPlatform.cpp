@@ -8,7 +8,7 @@
 
 #include "GDBRemoteCommunicationServerPlatform.h"
 
-#include <errno.h>
+#include <cerrno>
 
 #include <chrono>
 #include <csignal>
@@ -153,7 +153,8 @@ GDBRemoteCommunicationServerPlatform::GDBRemoteCommunicationServerPlatform(
 }
 
 // Destructor
-GDBRemoteCommunicationServerPlatform::~GDBRemoteCommunicationServerPlatform() {}
+GDBRemoteCommunicationServerPlatform::~GDBRemoteCommunicationServerPlatform() =
+    default;
 
 Status GDBRemoteCommunicationServerPlatform::LaunchGDBServer(
     const lldb_private::Args &args, std::string hostname, lldb::pid_t &pid,
@@ -205,7 +206,7 @@ Status GDBRemoteCommunicationServerPlatform::LaunchGDBServer(
                                platform_port, platform_path);
     UNUSED_IF_ASSERT_DISABLED(ok);
     assert(ok);
-    url << platform_ip.str() << ":" << *port;
+    url << '[' << platform_ip.str() << "]:" << *port;
   } else {
     socket_name = GetDomainSocketPath("gdbserver").GetPath();
     url << socket_name;

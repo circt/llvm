@@ -51,7 +51,7 @@ define <2 x i141> @ashr_0_vec_undef_elt(<2 x i141> %X) {
 
 define i55 @lshr_by_bitwidth(i55 %A) {
 ; CHECK-LABEL: @lshr_by_bitwidth(
-; CHECK-NEXT:    ret i55 undef
+; CHECK-NEXT:    ret i55 poison
 ;
   %B = lshr i55 %A, 55
   ret i55 %B
@@ -59,7 +59,7 @@ define i55 @lshr_by_bitwidth(i55 %A) {
 
 define i32 @shl_by_bitwidth(i32 %A) {
 ; CHECK-LABEL: @shl_by_bitwidth(
-; CHECK-NEXT:    ret i32 undef
+; CHECK-NEXT:    ret i32 poison
 ;
   %B = shl i32 %A, 32
   ret i32 %B
@@ -67,7 +67,7 @@ define i32 @shl_by_bitwidth(i32 %A) {
 
 define <4 x i32> @lshr_by_bitwidth_splat(<4 x i32> %A) {
 ; CHECK-LABEL: @lshr_by_bitwidth_splat(
-; CHECK-NEXT:    ret <4 x i32> undef
+; CHECK-NEXT:    ret <4 x i32> poison
 ;
   %B = lshr <4 x i32> %A, <i32 32, i32 32, i32 32, i32 32>     ;; shift all bits out
   ret <4 x i32> %B
@@ -83,7 +83,7 @@ define <4 x i32> @lshr_by_0_splat(<4 x i32> %A) {
 
 define <4 x i32> @shl_by_bitwidth_splat(<4 x i32> %A) {
 ; CHECK-LABEL: @shl_by_bitwidth_splat(
-; CHECK-NEXT:    ret <4 x i32> undef
+; CHECK-NEXT:    ret <4 x i32> poison
 ;
   %B = shl <4 x i32> %A, <i32 32, i32 32, i32 32, i32 32>     ;; shift all bits out
   ret <4 x i32> %B
@@ -238,11 +238,9 @@ define <2 x i64> @shl_or_shr2v(<2 x i32> %a, <2 x i32> %b) {
   ret <2 x i64> %tmp5
 }
 
-; TOOD: these should be poison
-
 define i32 @poison(i32 %x) {
 ; CHECK-LABEL: @poison(
-; CHECK-NEXT:    ret i32 undef
+; CHECK-NEXT:    ret i32 poison
 ;
   %v = lshr i32 %x, poison
   ret i32 %v
@@ -250,7 +248,7 @@ define i32 @poison(i32 %x) {
 
 define i32 @poison2(i32 %x) {
 ; CHECK-LABEL: @poison2(
-; CHECK-NEXT:    ret i32 undef
+; CHECK-NEXT:    ret i32 poison
 ;
   %v = ashr i32 %x, poison
   ret i32 %v
@@ -258,7 +256,7 @@ define i32 @poison2(i32 %x) {
 
 define i32 @poison3(i32 %x) {
 ; CHECK-LABEL: @poison3(
-; CHECK-NEXT:    ret i32 undef
+; CHECK-NEXT:    ret i32 poison
 ;
   %v = shl i32 %x, poison
   ret i32 %v
@@ -266,7 +264,7 @@ define i32 @poison3(i32 %x) {
 
 define i32 @poison4(i32 %x) {
 ; CHECK-LABEL: @poison4(
-; CHECK-NEXT:    ret i32 0
+; CHECK-NEXT:    ret i32 poison
 ;
   %v = lshr i32 poison, %x
   ret i32 %v
@@ -274,7 +272,7 @@ define i32 @poison4(i32 %x) {
 
 define i32 @poison5(i32 %x) {
 ; CHECK-LABEL: @poison5(
-; CHECK-NEXT:    ret i32 0
+; CHECK-NEXT:    ret i32 poison
 ;
   %v = ashr i32 poison, %x
   ret i32 %v
@@ -282,7 +280,7 @@ define i32 @poison5(i32 %x) {
 
 define i32 @poison6(i32 %x) {
 ; CHECK-LABEL: @poison6(
-; CHECK-NEXT:    ret i32 0
+; CHECK-NEXT:    ret i32 poison
 ;
   %v = shl i32 poison, %x
   ret i32 %v

@@ -48,6 +48,7 @@ Status TargetList::CreateTarget(Debugger &debugger,
                                 LoadDependentFiles load_dependent_files,
                                 const OptionGroupPlatform *platform_options,
                                 TargetSP &target_sp) {
+  std::lock_guard<std::recursive_mutex> guard(m_target_list_mutex);
   auto result = TargetList::CreateTargetInternal(
       debugger, user_exe_path, triple_str, load_dependent_files,
       platform_options, target_sp);
@@ -62,6 +63,7 @@ Status TargetList::CreateTarget(Debugger &debugger,
                                 const ArchSpec &specified_arch,
                                 LoadDependentFiles load_dependent_files,
                                 PlatformSP &platform_sp, TargetSP &target_sp) {
+  std::lock_guard<std::recursive_mutex> guard(m_target_list_mutex);
   auto result = TargetList::CreateTargetInternal(
       debugger, user_exe_path, specified_arch, load_dependent_files,
       platform_sp, target_sp);
@@ -286,10 +288,9 @@ Status TargetList::CreateTargetInternal(Debugger &debugger,
                                         LoadDependentFiles load_dependent_files,
                                         lldb::PlatformSP &platform_sp,
                                         lldb::TargetSP &target_sp) {
-  static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
-  Timer scoped_timer(
-      func_cat, "TargetList::CreateTarget (file = '%s', arch = '%s')",
-      user_exe_path.str().c_str(), specified_arch.GetArchitectureName());
+  LLDB_SCOPED_TIMERF("TargetList::CreateTarget (file = '%s', arch = '%s')",
+                     user_exe_path.str().c_str(),
+                     specified_arch.GetArchitectureName());
   Status error;
   const bool is_dummy_target = false;
 

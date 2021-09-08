@@ -152,7 +152,8 @@ loop:
 }
 
 ; CHECK-LABEL: phi_and_gep_unknown_size
-; CHECK: NoModRef:   call void @llvm.memset.p0i8.i32(i8* %g, i8 0, i32 %size, i1 false) <->   call void @llvm.memset.p0i8.i32(i8* %z, i8 0, i32 %size, i1 false)
+; CHECK: Just Mod:   call void @llvm.memset.p0i8.i32(i8* %g, i8 0, i32 %size, i1 false) <->   call void @llvm.memset.p0i8.i32(i8* %z, i8 0, i32 %size, i1 false)
+; TODO: This should be NoModRef.
 define void @phi_and_gep_unknown_size(i1 %c, i8* %x, i8* %y, i8* noalias %z, i32 %size) {
 entry:
   br i1 %c, label %true, label %false
@@ -196,3 +197,22 @@ for.body:                                         ; preds = %for.body, %entry
   store i32 0, i32* %arrayidx13, align 4
   br label %for.body
 } 
+
+; CHECK-LABEL: single_arg_phi
+; CHECK: NoAlias: i32* %ptr, i32* %ptr.next
+; CHECK: MustAlias: i32* %ptr, i32* %ptr.phi
+; CHECK: MustAlias: i32* %ptr.next, i32* %ptr.next.phi
+define void @single_arg_phi(i32* %ptr.base) {
+entry:
+  br label %loop
+
+loop:
+  %ptr = phi i32* [ %ptr.base, %entry ], [ %ptr.next, %split ]
+  %ptr.next = getelementptr inbounds i32, i32* %ptr, i64 1
+  br label %split
+
+split:
+  %ptr.phi = phi i32* [ %ptr, %loop ]
+  %ptr.next.phi = phi i32* [ %ptr.next, %loop ]
+  br label %loop
+}

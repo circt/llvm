@@ -13,10 +13,10 @@
 #ifndef LLVM_LIB_TARGET_RISCV_RISCVSUBTARGET_H
 #define LLVM_LIB_TARGET_RISCV_RISCVSUBTARGET_H
 
+#include "MCTargetDesc/RISCVBaseInfo.h"
 #include "RISCVFrameLowering.h"
 #include "RISCVISelLowering.h"
 #include "RISCVInstrInfo.h"
-#include "Utils/RISCVBaseInfo.h"
 #include "llvm/CodeGen/GlobalISel/CallLowering.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelector.h"
 #include "llvm/CodeGen/GlobalISel/LegalizerInfo.h"
@@ -40,6 +40,7 @@ class RISCVSubtarget : public RISCVGenSubtargetInfo {
   bool HasStdExtD = false;
   bool HasStdExtC = false;
   bool HasStdExtB = false;
+  bool HasStdExtZba = false;
   bool HasStdExtZbb = false;
   bool HasStdExtZbc = false;
   bool HasStdExtZbe = false;
@@ -61,6 +62,7 @@ class RISCVSubtarget : public RISCVGenSubtargetInfo {
   bool EnableSaveRestore = false;
   unsigned XLen = 32;
   MVT XLenVT = MVT::i32;
+  uint8_t MaxInterleaveFactor = 2;
   RISCVABI::ABI TargetABI = RISCVABI::ABI_Unknown;
   BitVector UserReservedRegister;
   RISCVFrameLowering FrameLowering;
@@ -106,6 +108,7 @@ public:
   bool hasStdExtD() const { return HasStdExtD; }
   bool hasStdExtC() const { return HasStdExtC; }
   bool hasStdExtB() const { return HasStdExtB; }
+  bool hasStdExtZba() const { return HasStdExtZba; }
   bool hasStdExtZbb() const { return HasStdExtZbb; }
   bool hasStdExtZbc() const { return HasStdExtZbc; }
   bool hasStdExtZbe() const { return HasStdExtZbe; }
@@ -132,6 +135,9 @@ public:
     assert(i < RISCV::NUM_TARGET_REGS && "Register out of range");
     return UserReservedRegister[i];
   }
+  unsigned getMaxInterleaveFactor() const {
+    return hasStdExtV() ? MaxInterleaveFactor : 1;
+  }
 
 protected:
   // GlobalISel related APIs.
@@ -145,6 +151,15 @@ public:
   InstructionSelector *getInstructionSelector() const override;
   const LegalizerInfo *getLegalizerInfo() const override;
   const RegisterBankInfo *getRegBankInfo() const override;
+
+  // Return the known range for the bit length of RVV data registers. A value
+  // of 0 means nothing is known about that particular limit beyond what's
+  // implied by the architecture.
+  unsigned getMaxRVVVectorSizeInBits() const;
+  unsigned getMinRVVVectorSizeInBits() const;
+  unsigned getMaxLMULForFixedLengthVectors() const;
+  unsigned getMaxELENForFixedLengthVectors() const;
+  bool useRVVForFixedLengthVectors() const;
 };
 } // End llvm namespace
 

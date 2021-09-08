@@ -39,6 +39,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/Errc.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
@@ -84,6 +85,10 @@ static cl::opt<int> ImportCutoff(
     "import-cutoff", cl::init(-1), cl::Hidden, cl::value_desc("N"),
     cl::desc("Only import first N functions if N>=0 (default -1)"));
 
+static cl::opt<bool>
+    ForceImportAll("force-import-all", cl::init(false), cl::Hidden,
+                   cl::desc("Import functions with noinline attribute"));
+
 static cl::opt<float>
     ImportInstrFactor("import-instr-evolution-factor", cl::init(0.7),
                       cl::Hidden, cl::value_desc("x"),
@@ -124,14 +129,8 @@ static cl::opt<bool> ComputeDead("compute-dead", cl::init(true), cl::Hidden,
                                  cl::desc("Compute dead symbols"));
 
 static cl::opt<bool> EnableImportMetadata(
-    "enable-import-metadata", cl::init(
-#if !defined(NDEBUG)
-                                  true /*Enabled with asserts.*/
-#else
-                                  false
-#endif
-                                  ),
-    cl::Hidden, cl::desc("Enable import metadata like 'thinlto_src_module'"));
+    "enable-import-metadata", cl::init(false), cl::Hidden,
+    cl::desc("Enable import metadata like 'thinlto_src_module'"));
 
 /// Summary file to use for function importing when using -function-import from
 /// the command line.
@@ -233,7 +232,7 @@ selectCallee(const ModuleSummaryIndex &Index,
         }
 
         if ((Summary->instCount() > Threshold) &&
-            !Summary->fflags().AlwaysInline) {
+            !Summary->fflags().AlwaysInline && !ForceImportAll) {
           Reason = FunctionImporter::ImportFailureReason::TooLarge;
           return false;
         }
@@ -246,7 +245,7 @@ selectCallee(const ModuleSummaryIndex &Index,
         }
 
         // Don't bother importing if we can't inline it anyway.
-        if (Summary->fflags().NoInline) {
+        if (Summary->fflags().NoInline && !ForceImportAll) {
           Reason = FunctionImporter::ImportFailureReason::NoInline;
           return false;
         }
@@ -281,6 +280,29 @@ updateValueInfoForIndirectCalls(const ModuleSummaryIndex &Index, ValueInfo VI) {
   return Index.getValueInfo(GUID);
 }
 
+static bool shouldImportGlobal(const ValueInfo &VI,
+                               const GVSummaryMapTy &DefinedGVSummaries) {
+  const auto &GVS = DefinedGVSummaries.find(VI.getGUID());
+  if (GVS == DefinedGVSummaries.end())
+    return true;
+  // We should not skip import if the module contains a definition with
+  // interposable linkage type. This is required for correctness in
+  // the situation with two following conditions:
+  // * the def with interposable linkage is non-prevailing,
+  // * there is a prevailing def available for import and marked read-only.
+  // In this case, the non-prevailing def will be converted to a declaration,
+  // while the prevailing one becomes internal, thus no definitions will be
+  // available for linking. In order to prevent undefined symbol link error,
+  // the prevailing definition must be imported.
+  // FIXME: Consider adding a check that the suitable prevailing definition
+  // exists and marked read-only.
+  if (VI.getSummaryList().size() > 1 &&
+      GlobalValue::isInterposableLinkage(GVS->second->linkage()))
+    return true;
+
+  return false;
+}
+
 static void computeImportForReferencedGlobals(
     const GlobalValueSummary &Summary, const ModuleSummaryIndex &Index,
     const GVSummaryMapTy &DefinedGVSummaries,
@@ -288,7 +310,7 @@ static void computeImportForReferencedGlobals(
     FunctionImporter::ImportMapTy &ImportList,
     StringMap<FunctionImporter::ExportSetTy> *ExportLists) {
   for (auto &VI : Summary.refs()) {
-    if (DefinedGVSummaries.count(VI.getGUID())) {
+    if (!shouldImportGlobal(VI, DefinedGVSummaries)) {
       LLVM_DEBUG(
           dbgs() << "Ref ignored! Target already in destination module.\n");
       continue;
@@ -384,6 +406,9 @@ static void computeImportForFunction(
       continue;
 
     if (DefinedGVSummaries.count(VI.getGUID())) {
+      // FIXME: Consider not skipping import if the module contains
+      // a non-prevailing def with interposable linkage. The prevailing copy
+      // can safely be imported (see shouldImportGlobal()).
       LLVM_DEBUG(dbgs() << "ignored! Target already in destination module.\n");
       continue;
     }
@@ -467,17 +492,28 @@ static void computeImportForFunction(
           FailureInfo = std::make_unique<FunctionImporter::ImportFailureInfo>(
               VI, Edge.second.getHotness(), Reason, 1);
         }
-        LLVM_DEBUG(
-            dbgs() << "ignored! No qualifying callee with summary found.\n");
-        continue;
+        if (ForceImportAll) {
+          std::string Msg = std::string("Failed to import function ") +
+                            VI.name().str() + " due to " +
+                            getFailureName(Reason);
+          auto Error = make_error<StringError>(
+              Msg, make_error_code(errc::not_supported));
+          logAllUnhandledErrors(std::move(Error), errs(),
+                                "Error importing module: ");
+          break;
+        } else {
+          LLVM_DEBUG(dbgs()
+                     << "ignored! No qualifying callee with summary found.\n");
+          continue;
+        }
       }
 
       // "Resolve" the summary
       CalleeSummary = CalleeSummary->getBaseObject();
       ResolvedCalleeSummary = cast<FunctionSummary>(CalleeSummary);
 
-      assert((ResolvedCalleeSummary->fflags().AlwaysInline ||
-	     (ResolvedCalleeSummary->instCount() <= NewThreshold)) &&
+      assert((ResolvedCalleeSummary->fflags().AlwaysInline || ForceImportAll ||
+              (ResolvedCalleeSummary->instCount() <= NewThreshold)) &&
              "selectCallee() didn't honor the threshold");
 
       auto ExportModulePath = ResolvedCalleeSummary->modulePath();
@@ -894,7 +930,6 @@ void llvm::computeDeadSymbols(
   while (!Worklist.empty()) {
     auto VI = Worklist.pop_back_val();
     for (auto &Summary : VI.getSummaryList()) {
-      Summary->setLive(true);
       if (auto *AS = dyn_cast<AliasSummary>(Summary.get())) {
         // If this is an alias, visit the aliasee VI to ensure that all copies
         // are marked live and it is added to the worklist for further
@@ -1006,7 +1041,6 @@ bool llvm::convertToDeclaration(GlobalValue &GV) {
   return true;
 }
 
-/// Fixup prevailing symbol linkages in \p TheModule based on summary analysis.
 void llvm::thinLTOResolvePrevailingInModule(
     Module &TheModule, const GVSummaryMapTy &DefinedGlobals) {
   auto updateLinkage = [&](GlobalValue &GV) {
@@ -1015,8 +1049,6 @@ void llvm::thinLTOResolvePrevailingInModule(
     if (GS == DefinedGlobals.end())
       return;
     auto NewLinkage = GS->second->linkage();
-    if (NewLinkage == GV.getLinkage())
-      return;
     if (GlobalValue::isLocalLinkage(GV.getLinkage()) ||
         // Don't internalize anything here, because the code below
         // lacks necessary correctness checks. Leave this job to
@@ -1024,6 +1056,16 @@ void llvm::thinLTOResolvePrevailingInModule(
         GlobalValue::isLocalLinkage(NewLinkage) ||
         // In case it was dead and already converted to declaration.
         GV.isDeclaration())
+      return;
+
+    // Set the potentially more constraining visibility computed from summaries.
+    // The DefaultVisibility condition is because older GlobalValueSummary does
+    // not record DefaultVisibility and we don't want to change protected/hidden
+    // to default.
+    if (GS->second->getVisibility() != GlobalValue::DefaultVisibility)
+      GV.setVisibility(GS->second->getVisibility());
+
+    if (NewLinkage == GV.getLinkage())
       return;
 
     // Check for a non-prevailing def that has interposable linkage

@@ -208,9 +208,8 @@ struct PositiveMultipleConstructors {
   PositiveMultipleConstructors(const PositiveMultipleConstructors &) {}
   // CHECK-MESSAGES: :[[@LINE-1]]:3: warning: constructor does not initialize these fields: A, B
 
-  // FIXME: The fix-its here collide providing an erroneous fix
   int A, B;
-  // CHECK-FIXES: int A{}{}{}, B{}{}{};
+  // CHECK-FIXES: int A{}, B{};
 };
 
 typedef struct {
@@ -501,3 +500,19 @@ struct NegativeImplicitInheritedCtor : NegativeImplicitInheritedCtorBase {
 void Bug33557() {
   NegativeImplicitInheritedCtor I(5);
 }
+
+struct NegativeDefaultedCtorOutOfDecl {
+  NegativeDefaultedCtorOutOfDecl(const NegativeDefaultedCtorOutOfDecl &);
+  int F;
+};
+
+NegativeDefaultedCtorOutOfDecl::NegativeDefaultedCtorOutOfDecl(const NegativeDefaultedCtorOutOfDecl &) = default;
+
+struct PositiveDefaultConstructorOutOfDecl {
+  PositiveDefaultConstructorOutOfDecl();
+  int F;
+  // CHECK-FIXES: int F{};
+};
+
+PositiveDefaultConstructorOutOfDecl::PositiveDefaultConstructorOutOfDecl() = default;
+// CHECK-MESSAGES: :[[@LINE-1]]:1: warning: constructor does not initialize these fields: F

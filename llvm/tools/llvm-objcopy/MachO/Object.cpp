@@ -10,9 +10,8 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include <unordered_set>
 
-namespace llvm {
-namespace objcopy {
-namespace macho {
+using namespace llvm;
+using namespace llvm::objcopy::macho;
 
 const SymbolEntry *SymbolTable::getSymbolByIndex(uint32_t Index) const {
   assert(Index < Symbols.size() && "invalid symbol index");
@@ -26,9 +25,7 @@ SymbolEntry *SymbolTable::getSymbolByIndex(uint32_t Index) {
 
 void SymbolTable::removeSymbols(
     function_ref<bool(const std::unique_ptr<SymbolEntry> &)> ToRemove) {
-  Symbols.erase(
-      std::remove_if(std::begin(Symbols), std::end(Symbols), ToRemove),
-      std::end(Symbols));
+  llvm::erase_if(Symbols, ToRemove);
 }
 
 void Object::updateLoadCommandIndexes() {
@@ -48,6 +45,9 @@ void Object::updateLoadCommandIndexes() {
       break;
     case MachO::LC_DATA_IN_CODE:
       DataInCodeCommandIndex = Index;
+      break;
+    case MachO::LC_LINKER_OPTIMIZATION_HINT:
+      LinkerOptimizationHintCommandIndex = Index;
       break;
     case MachO::LC_FUNCTION_STARTS:
       FunctionStartsCommandIndex = Index;
@@ -192,7 +192,3 @@ Optional<uint64_t> LoadCommand::getSegmentVMAddr() const {
     return None;
   }
 }
-
-} // end namespace macho
-} // end namespace objcopy
-} // end namespace llvm

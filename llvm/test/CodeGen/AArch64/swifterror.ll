@@ -1,7 +1,7 @@
-; RUN: llc -fast-isel-sink-local-values -verify-machineinstrs -frame-pointer=all -enable-shrink-wrap=false < %s -mtriple=aarch64-apple-ios -disable-post-ra | FileCheck -allow-deprecated-dag-overlap --check-prefix=CHECK-APPLE --check-prefix=CHECK-APPLE-AARCH64 %s
-; RUN: llc -fast-isel-sink-local-values -verify-machineinstrs -frame-pointer=all -O0 -fast-isel < %s -mtriple=aarch64-apple-ios -disable-post-ra | FileCheck -allow-deprecated-dag-overlap --check-prefix=CHECK-O0 --check-prefix=CHECK-O0-AARCH64 %s
-; RUN: llc -fast-isel-sink-local-values -verify-machineinstrs -frame-pointer=all -enable-shrink-wrap=false < %s -mtriple=arm64_32-apple-ios -disable-post-ra | FileCheck -allow-deprecated-dag-overlap --check-prefix=CHECK-APPLE --check-prefix=CHECK-APPLE-ARM64_32 %s
-; RUN: llc -fast-isel-sink-local-values -verify-machineinstrs -O0 -fast-isel < %s -mtriple=arm64_32-apple-ios -disable-post-ra | FileCheck -allow-deprecated-dag-overlap --check-prefix=CHECK-O0 --check-prefix=CHECK-O0-ARM64_32 %s
+; RUN: llc -verify-machineinstrs -frame-pointer=all -enable-shrink-wrap=false < %s -mtriple=aarch64-apple-ios -disable-post-ra | FileCheck -allow-deprecated-dag-overlap --check-prefix=CHECK-APPLE --check-prefix=CHECK-APPLE-AARCH64 %s
+; RUN: llc -verify-machineinstrs -frame-pointer=all -O0 -fast-isel < %s -mtriple=aarch64-apple-ios -disable-post-ra | FileCheck -allow-deprecated-dag-overlap --check-prefix=CHECK-O0 --check-prefix=CHECK-O0-AARCH64 %s
+; RUN: llc -verify-machineinstrs -frame-pointer=all -enable-shrink-wrap=false < %s -mtriple=arm64_32-apple-ios -disable-post-ra | FileCheck -allow-deprecated-dag-overlap --check-prefix=CHECK-APPLE --check-prefix=CHECK-APPLE-ARM64_32 %s
+; RUN: llc -verify-machineinstrs -O0 -fast-isel < %s -mtriple=arm64_32-apple-ios -disable-post-ra | FileCheck -allow-deprecated-dag-overlap --check-prefix=CHECK-O0 --check-prefix=CHECK-O0-ARM64_32 %s
 
 declare i8* @malloc(i64)
 declare void @free(i8*)
@@ -125,9 +125,9 @@ define float @foo_if(%swift_error** swifterror %error_ptr_ref, i32 %cc) {
 ; CHECK-APPLE: cbz w0
 ; CHECK-APPLE: mov w0, #16
 ; CHECK-APPLE: malloc
+; CHECK-APPLE: mov x21, x0
 ; CHECK-APPLE: mov [[ID:w[0-9]+]], #1
 ; CHECK-APPLE: strb [[ID]], [x0, #8]
-; CHECK-APPLE: mov x21, x0
 ; CHECK-APPLE-NOT: x21
 ; CHECK-APPLE: ret
 

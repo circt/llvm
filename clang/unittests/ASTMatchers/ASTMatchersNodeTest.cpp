@@ -876,7 +876,7 @@ TEST_P(ASTMatchersTest, Matcher_NoexceptExpression) {
   EXPECT_TRUE(
       matches("void foo() noexcept; bool bar = noexcept(foo());", NoExcept));
   EXPECT_TRUE(notMatches("void foo() noexcept;", NoExcept));
-  EXPECT_TRUE(notMatches("void foo() noexcept(1+1);", NoExcept));
+  EXPECT_TRUE(notMatches("void foo() noexcept(0+1);", NoExcept));
   EXPECT_TRUE(matches("void foo() noexcept(noexcept(1+1));", NoExcept));
 }
 
@@ -980,6 +980,11 @@ TEST_P(ASTMatchersTest, GNUNullExpr) {
     return;
   }
   EXPECT_TRUE(matches("int* i = __null;", gnuNullExpr()));
+}
+
+TEST_P(ASTMatchersTest, GenericSelectionExpr) {
+  EXPECT_TRUE(matches("void f() { (void)_Generic(1, int: 1, float: 2.0); }",
+                      genericSelectionExpr()));
 }
 
 TEST_P(ASTMatchersTest, AtomicExpr) {
@@ -1423,6 +1428,22 @@ TEST_P(ASTMatchersTest, UsingDecl_MatchesShadowUsingDelcarations) {
                       usingDecl(hasAnyUsingShadowDecl(hasName("a")))));
 }
 
+TEST_P(ASTMatchersTest, UsingEnumDecl_MatchesUsingEnumDeclarations) {
+  if (!GetParam().isCXX20OrLater()) {
+    return;
+  }
+  EXPECT_TRUE(
+      matches("namespace X { enum x {}; } using enum X::x;", usingEnumDecl()));
+}
+
+TEST_P(ASTMatchersTest, UsingEnumDecl_MatchesShadowUsingDeclarations) {
+  if (!GetParam().isCXX20OrLater()) {
+    return;
+  }
+  EXPECT_TRUE(matches("namespace f { enum a {b}; } using enum f::a;",
+                      usingEnumDecl(hasAnyUsingShadowDecl(hasName("b")))));
+}
+
 TEST_P(ASTMatchersTest, UsingDirectiveDecl_MatchesUsingNamespace) {
   if (!GetParam().isCXX()) {
     return;
@@ -1864,6 +1885,29 @@ TEST_P(ASTMatchersTest, NestedNameSpecifier) {
                  nestedNameSpecifier()));
 }
 
+TEST_P(ASTMatchersTest, Attr) {
+  // Windows adds some implicit attributes.
+  bool AutomaticAttributes = StringRef(GetParam().Target).contains("win32");
+  if (GetParam().isCXX11OrLater()) {
+    EXPECT_TRUE(matches("struct [[clang::warn_unused_result]] F{};", attr()));
+
+    // Unknown attributes are not parsed into an AST node.
+    if (!AutomaticAttributes) {
+      EXPECT_TRUE(notMatches("int x [[unknownattr]];", attr()));
+    }
+  }
+  if (GetParam().isCXX17OrLater()) {
+    EXPECT_TRUE(matches("struct [[nodiscard]] F{};", attr()));
+  }
+  EXPECT_TRUE(matches("int x(int * __attribute__((nonnull)) );", attr()));
+  if (!AutomaticAttributes) {
+    EXPECT_TRUE(notMatches("struct F{}; int x(int *);", attr()));
+    // Some known attributes are not parsed into an AST node.
+    EXPECT_TRUE(notMatches("typedef int x __attribute__((ext_vector_type(1)));",
+                           attr()));
+  }
+}
+
 TEST_P(ASTMatchersTest, NullStmt) {
   EXPECT_TRUE(matches("void f() {int i;;}", nullStmt()));
   EXPECT_TRUE(notMatches("void f() {int i;}", nullStmt()));
@@ -2124,6 +2168,37 @@ TEST(ASTMatchersTestObjC, ObjCExceptionStmts) {
   EXPECT_TRUE(matchesObjC(ObjCString, objcFinallyStmt()));
 }
 
+TEST(ASTMatchersTest, DecompositionDecl) {
+  StringRef Code = R"cpp(
+void foo()
+{
+    int arr[3];
+    auto &[f, s, t] = arr;
+
+    f = 42;
+}
+  )cpp";
+  EXPECT_TRUE(matchesConditionally(
+      Code, decompositionDecl(hasBinding(0, bindingDecl(hasName("f")))), true,
+      {"-std=c++17"}));
+  EXPECT_FALSE(matchesConditionally(
+      Code, decompositionDecl(hasBinding(42, bindingDecl(hasName("f")))), true,
+      {"-std=c++17"}));
+  EXPECT_FALSE(matchesConditionally(
+      Code, decompositionDecl(hasBinding(0, bindingDecl(hasName("s")))), true,
+      {"-std=c++17"}));
+  EXPECT_TRUE(matchesConditionally(
+      Code, decompositionDecl(hasBinding(1, bindingDecl(hasName("s")))), true,
+      {"-std=c++17"}));
+
+  EXPECT_TRUE(matchesConditionally(
+      Code,
+      bindingDecl(decl().bind("self"), hasName("f"),
+                  forDecomposition(decompositionDecl(
+                      hasAnyBinding(bindingDecl(equalsBoundNode("self")))))),
+      true, {"-std=c++17"}));
+}
+
 TEST(ASTMatchersTestObjC, ObjCAutoreleasePoolStmt) {
   StringRef ObjCString = "void f() {"
                          "@autoreleasepool {"
@@ -2266,8 +2341,8 @@ static std::vector<TestClangConfig> allTestClangConfigs() {
   return all_configs;
 }
 
-INSTANTIATE_TEST_CASE_P(ASTMatchersTests, ASTMatchersTest,
-                        testing::ValuesIn(allTestClangConfigs()), );
+INSTANTIATE_TEST_SUITE_P(ASTMatchersTests, ASTMatchersTest,
+                         testing::ValuesIn(allTestClangConfigs()));
 
 } // namespace ast_matchers
 } // namespace clang

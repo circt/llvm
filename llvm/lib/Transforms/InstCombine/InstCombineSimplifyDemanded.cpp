@@ -220,6 +220,17 @@ Value *InstCombinerImpl::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
     if (SimplifyDemandedBits(I, 1, DemandedMask, RHSKnown, Depth + 1) ||
         SimplifyDemandedBits(I, 0, DemandedMask, LHSKnown, Depth + 1))
       return I;
+    Value *LHS, *RHS;
+    if (DemandedMask == 1 &&
+        match(I->getOperand(0), m_Intrinsic<Intrinsic::ctpop>(m_Value(LHS))) &&
+        match(I->getOperand(1), m_Intrinsic<Intrinsic::ctpop>(m_Value(RHS)))) {
+      // (ctpop(X) ^ ctpop(Y)) & 1 --> ctpop(X^Y) & 1
+      IRBuilderBase::InsertPointGuard Guard(Builder);
+      Builder.SetInsertPoint(I);
+      auto *Xor = Builder.CreateXor(LHS, RHS);
+      return Builder.CreateUnaryIntrinsic(Intrinsic::ctpop, Xor);
+    }
+
     assert(!RHSKnown.hasConflict() && "Bits known to be one AND zero?");
     assert(!LHSKnown.hasConflict() && "Bits known to be one AND zero?");
 
@@ -345,10 +356,14 @@ Value *InstCombinerImpl::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
         return false;
 
       // Get the constant out of the ICmp, if there is one.
+      // Only try this when exactly 1 operand is a constant (if both operands
+      // are constant, the icmp should eventually simplify). Otherwise, we may
+      // invert the transform that reduces set bits and infinite-loop.
+      Value *X;
       const APInt *CmpC;
       ICmpInst::Predicate Pred;
-      if (!match(I->getOperand(0), m_c_ICmp(Pred, m_APInt(CmpC), m_Value())) ||
-          CmpC->getBitWidth() != SelC->getBitWidth())
+      if (!match(I->getOperand(0), m_ICmp(Pred, m_Value(X), m_APInt(CmpC))) ||
+          isa<Constant>(X) || CmpC->getBitWidth() != SelC->getBitWidth())
         return ShrinkDemandedConstant(I, OpNo, DemandedMask);
 
       // If the constant is already the same as the ICmp, leave it as-is.
@@ -555,6 +570,17 @@ Value *InstCombinerImpl::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
           return UndefValue::get(I->getType());
       }
     } else {
+      // This is a variable shift, so we can't shift the demand mask by a known
+      // amount. But if we are not demanding high bits, then we are not
+      // demanding those bits from the pre-shifted operand either.
+      if (unsigned CTLZ = DemandedMask.countLeadingZeros()) {
+        APInt DemandedFromOp(APInt::getLowBitsSet(BitWidth, BitWidth - CTLZ));
+        if (SimplifyDemandedBits(I, 0, DemandedFromOp, Known, Depth + 1)) {
+          // We can't guarantee that nsw/nuw hold after simplifying the operand.
+          I->dropPoisonGeneratingFlags();
+          return I;
+        }
+      }
       computeKnownBits(I, Known, Depth, CxtI);
     }
     break;
@@ -730,6 +756,24 @@ Value *InstCombinerImpl::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
     bool KnownBitsComputed = false;
     if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(I)) {
       switch (II->getIntrinsicID()) {
+      case Intrinsic::abs: {
+        if (DemandedMask == 1)
+          return II->getArgOperand(0);
+        break;
+      }
+      case Intrinsic::ctpop: {
+        // Checking if the number of clear bits is odd (parity)? If the type has
+        // an even number of bits, that's the same as checking if the number of
+        // set bits is odd, so we can eliminate the 'not' op.
+        Value *X;
+        if (DemandedMask == 1 && VTy->getScalarSizeInBits() % 2 == 0 &&
+            match(II->getArgOperand(0), m_Not(m_Value(X)))) {
+          Function *Ctpop = Intrinsic::getDeclaration(
+              II->getModule(), Intrinsic::ctpop, II->getType());
+          return InsertNewInstWith(CallInst::Create(Ctpop, {X}), *I);
+        }
+        break;
+      }
       case Intrinsic::bswap: {
         // If the only bits demanded come from one byte of the bswap result,
         // just shift the input byte into position to eliminate the bswap.
@@ -783,6 +827,29 @@ Value *InstCombinerImpl::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
         Known.One = LHSKnown.One.shl(ShiftAmt) |
                     RHSKnown.One.lshr(BitWidth - ShiftAmt);
         KnownBitsComputed = true;
+        break;
+      }
+      case Intrinsic::umax: {
+        // UMax(A, C) == A if ...
+        // The lowest non-zero bit of DemandMask is higher than the highest
+        // non-zero bit of C.
+        const APInt *C;
+        unsigned CTZ = DemandedMask.countTrailingZeros();
+        if (match(II->getArgOperand(1), m_APInt(C)) &&
+            CTZ >= C->getActiveBits())
+          return II->getArgOperand(0);
+        break;
+      }
+      case Intrinsic::umin: {
+        // UMin(A, C) == A if ...
+        // The lowest non-zero bit of DemandMask is higher than the highest
+        // non-one bit of C.
+        // This comes from using DeMorgans on the above umax example.
+        const APInt *C;
+        unsigned CTZ = DemandedMask.countTrailingZeros();
+        if (match(II->getArgOperand(1), m_APInt(C)) &&
+            CTZ >= C->getBitWidth() - C->countLeadingOnes())
+          return II->getArgOperand(0);
         break;
       }
       default: {
@@ -918,7 +985,7 @@ Value *InstCombinerImpl::SimplifyMultipleUseDemandedBits(
     unsigned BitWidth = DemandedMask.getBitWidth();
     if (match(I,
               m_AShr(m_Shl(m_Value(X), m_APInt(ShiftLC)), m_APInt(ShiftRC))) &&
-        ShiftLC == ShiftRC &&
+        ShiftLC == ShiftRC && ShiftLC->ult(BitWidth) &&
         DemandedMask.isSubsetOf(APInt::getLowBitsSet(
             BitWidth, BitWidth - ShiftRC->getZExtValue()))) {
       return X;
@@ -1021,8 +1088,8 @@ Value *InstCombinerImpl::simplifyShrShlDemandedBits(
 }
 
 /// The specified value produces a vector with any number of elements.
-/// This method analyzes which elements of the operand are undef and returns
-/// that information in UndefElts.
+/// This method analyzes which elements of the operand are undef or poison and
+/// returns that information in UndefElts.
 ///
 /// DemandedElts contains the set of elements that are actually used by the
 /// caller, and by default (AllowMultipleUsers equals false) the value is
@@ -1047,15 +1114,15 @@ Value *InstCombinerImpl::SimplifyDemandedVectorElts(Value *V,
   APInt EltMask(APInt::getAllOnesValue(VWidth));
   assert((DemandedElts & ~EltMask) == 0 && "Invalid DemandedElts!");
 
-  if (isa<UndefValue>(V)) {
-    // If the entire vector is undefined, just return this info.
+  if (match(V, m_Undef())) {
+    // If the entire vector is undef or poison, just return this info.
     UndefElts = EltMask;
     return nullptr;
   }
 
-  if (DemandedElts.isNullValue()) { // If nothing is demanded, provide undef.
+  if (DemandedElts.isNullValue()) { // If nothing is demanded, provide poison.
     UndefElts = EltMask;
-    return UndefValue::get(V->getType());
+    return PoisonValue::get(V->getType());
   }
 
   UndefElts = 0;
@@ -1067,11 +1134,11 @@ Value *InstCombinerImpl::SimplifyDemandedVectorElts(Value *V,
       return nullptr;
 
     Type *EltTy = cast<VectorType>(V->getType())->getElementType();
-    Constant *Undef = UndefValue::get(EltTy);
+    Constant *Poison = PoisonValue::get(EltTy);
     SmallVector<Constant*, 16> Elts;
     for (unsigned i = 0; i != VWidth; ++i) {
-      if (!DemandedElts[i]) {   // If not demanded, set to undef.
-        Elts.push_back(Undef);
+      if (!DemandedElts[i]) {   // If not demanded, set to poison.
+        Elts.push_back(Poison);
         UndefElts.setBit(i);
         continue;
       }
@@ -1079,12 +1146,9 @@ Value *InstCombinerImpl::SimplifyDemandedVectorElts(Value *V,
       Constant *Elt = C->getAggregateElement(i);
       if (!Elt) return nullptr;
 
-      if (isa<UndefValue>(Elt)) {   // Already undef.
-        Elts.push_back(Undef);
+      Elts.push_back(Elt);
+      if (isa<UndefValue>(Elt))   // Already undef or poison.
         UndefElts.setBit(i);
-      } else {                               // Otherwise, defined.
-        Elts.push_back(Elt);
-      }
     }
 
     // If we changed the constant, return it.
@@ -1151,7 +1215,7 @@ Value *InstCombinerImpl::SimplifyDemandedVectorElts(Value *V,
     // merge the undef bits here since gepping with either an undef base or
     // index results in undef.
     for (unsigned i = 0; i < I->getNumOperands(); i++) {
-      if (isa<UndefValue>(I->getOperand(i))) {
+      if (match(I->getOperand(i), m_Undef())) {
         // If the entire vector is undefined, just return this info.
         UndefElts = EltMask;
         return nullptr;
@@ -1220,8 +1284,8 @@ Value *InstCombinerImpl::SimplifyDemandedVectorElts(Value *V,
     // operand.
     if (all_of(Shuffle->getShuffleMask(), [](int Elt) { return Elt == 0; }) &&
         DemandedElts.isAllOnesValue()) {
-      if (!isa<UndefValue>(I->getOperand(1))) {
-        I->setOperand(1, UndefValue::get(I->getOperand(1)->getType()));
+      if (!match(I->getOperand(1), m_Undef())) {
+        I->setOperand(1, PoisonValue::get(I->getOperand(1)->getType()));
         MadeChange = true;
       }
       APInt LeftDemanded(OpWidth, 1);

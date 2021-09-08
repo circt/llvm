@@ -22,18 +22,18 @@ struct input_device_id {
 struct input_device_id joydev_ids[] = { { {1}, 1234 } }; // KASAN ignored
 extern struct input_device_id __attribute__((alias("joydev_ids"))) __mod_joydev_ids_device_table;
 
-// ASAN: @aliased_global{{.*}} global { i32, [60 x i8] }{{.*}}, align 32
-// ASAN: @aliased_global_2{{.*}} global { i32, [60 x i8] }{{.*}}, align 32
+// ASAN: @aliased_global{{.*}} global { i32, [28 x i8] }{{.*}}, align 32
+// ASAN: @aliased_global_2{{.*}} global { i32, [28 x i8] }{{.*}}, align 32
 // ASAN: @joydev_ids{{.*}} global { {{.*}}[56 x i8] zeroinitializer }, align 32
 // KASAN: @aliased_global{{.*}} global i32
 // KASAN: @aliased_global_2{{.*}} global i32
 // KASAN: @joydev_ids{{.*}} global [1 x {{.*}}i64 1234 }], align 16
 
 // Check the aliases exist:
-// CHECK: @__global_alias = alias
-// CHECK: @global_alias_2 = alias
-// CHECK: @__global_alias_2_alias = alias
-// CHECK: @__mod_joydev_ids_device_table = alias
+// CHECK: @__global_alias ={{.*}} alias
+// CHECK: @global_alias_2 ={{.*}} alias
+// CHECK: @__global_alias_2_alias ={{.*}} alias
+// CHECK: @__mod_joydev_ids_device_table ={{.*}} alias
 
 // CHECK-LABEL: define internal void @asan.module_ctor
 // ASAN: call void @__asan_register_globals({{.*}}, i{{32|64}} 4)

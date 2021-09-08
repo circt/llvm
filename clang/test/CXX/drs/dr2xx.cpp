@@ -292,9 +292,9 @@ namespace dr224 { // dr224: no
     template <int, typename T> struct X { typedef T type; };
     template <class T> class A {
       static const int i = 5;
-      X<i, int>::type w; // FIXME: expected-error {{missing 'typename'}}
-      X<A::i, char>::type x; // FIXME: expected-error {{missing 'typename'}}
-      X<A<T>::i, double>::type y; // FIXME: expected-error {{missing 'typename'}}
+      X<i, int>::type w;
+      X<A::i, char>::type x;
+      X<A<T>::i, double>::type y;
       X<A<T*>::i, long>::type z; // expected-error {{missing 'typename'}}
       int f();
     };
@@ -597,12 +597,8 @@ namespace dr247 { // dr247: yes
   void (F::*i)() = &F::f;
 }
 
-namespace dr248 { // dr248: yes c++11
-  // FIXME: Should this also apply to c++98 mode? This was a DR against C++98.
+namespace dr248 { // dr248: sup P1949
   int \u040d\u040e = 0;
-#if __cplusplus < 201103L
-  // FIXME: expected-error@-2 {{expected ';'}}
-#endif
 }
 
 namespace dr249 { // dr249: yes

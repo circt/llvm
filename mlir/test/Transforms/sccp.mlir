@@ -1,4 +1,4 @@
-// RUN: mlir-opt -allow-unregistered-dialect %s -pass-pipeline="func(sccp)" -split-input-file | FileCheck %s
+// RUN: mlir-opt -allow-unregistered-dialect %s -pass-pipeline="builtin.func(sccp)" -split-input-file | FileCheck %s
 
 /// Check simple forward constant propagation without any control flow.
 
@@ -137,7 +137,7 @@ func @simple_loop_inner_control_flow(%arg0 : i32) -> i32 {
   // CHECK: cond_br %[[TRUE]], ^bb3, ^bb4
 
   %cst_20 = constant 20 : i32
-  %cond = cmpi "ult", %iv, %cst_20 : i32
+  %cond = cmpi ult, %iv, %cst_20 : i32
   cond_br %cond, ^bb3, ^bb4
 
 ^bb3:

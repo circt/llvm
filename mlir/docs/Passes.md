@@ -32,6 +32,10 @@ This document describes the available MLIR passes and their contracts.
 
 [include "LLVMPasses.md"]
 
+## `memref` Dialect Passes
+
+[include "MemRefPasses.md"]
+
 ## `quant` Dialect Passes
 
 [include "QuantPasses.md"]
@@ -48,6 +52,10 @@ This document describes the available MLIR passes and their contracts.
 
 [include "ShapePasses.md"]
 
+## `sparse_tensor` Dialect Passes
+
+[include "SparseTensorPasses.md"]
+
 ## `spv` Dialect Passes
 
 [include "SPIRVPasses.md"]
@@ -55,6 +63,10 @@ This document describes the available MLIR passes and their contracts.
 ## `standard` Dialect Passes
 
 [include "StandardPasses.md"]
+
+## `tensor` Dialect Passes
+
+[include "TensorPasses.md"]
 
 ## TOSA Dialect Passes
 

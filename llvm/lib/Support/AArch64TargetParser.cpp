@@ -100,6 +100,18 @@ bool AArch64::getExtensionFeatures(uint64_t Extensions,
     Features.push_back("+sve2-bitperm");
   if (Extensions & AEK_RCPC)
     Features.push_back("+rcpc");
+  if (Extensions & AEK_BRBE)
+    Features.push_back("+brbe");
+  if (Extensions & AEK_PAUTH)
+    Features.push_back("+pauth");
+  if (Extensions & AEK_FLAGM)
+    Features.push_back("+flagm");
+  if (Extensions & AArch64::AEK_SME)
+    Features.push_back("+sme");
+  if (Extensions & AArch64::AEK_SMEF64)
+    Features.push_back("+sme-f64");
+  if (Extensions & AArch64::AEK_SMEI64)
+    Features.push_back("+sme-i64");
 
   return true;
 }
@@ -118,6 +130,8 @@ bool AArch64::getArchFeatures(AArch64::ArchKind AK,
     Features.push_back("+v8.5a");
   if (AK == AArch64::ArchKind::ARMV8_6A)
     Features.push_back("+v8.6a");
+  if (AK == AArch64::ArchKind::ARMV8_7A)
+    Features.push_back("+v8.7a");
   if(AK == AArch64::ArchKind::ARMV8R)
     Features.push_back("+v8r");
 

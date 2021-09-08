@@ -14,8 +14,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "AMDGPUInstrInfo.h"
 #include "AMDGPUTargetTransformInfo.h"
-#include "llvm/Support/KnownBits.h"
+#include "GCNSubtarget.h"
+#include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/Transforms/InstCombine/InstCombiner.h"
 
 using namespace llvm;
@@ -159,7 +161,8 @@ simplifyAMDGCNImageIntrinsic(const GCNSubtarget *ST,
   CallInst *NewCall = IC.Builder.CreateCall(I, Args);
   NewCall->takeName(&II);
   NewCall->copyMetadata(II);
-  NewCall->copyFastMathFlags(&II);
+  if (isa<FPMathOperator>(NewCall))
+    NewCall->copyFastMathFlags(&II);
   return IC.replaceInstUsesWith(II, NewCall);
 }
 
@@ -582,8 +585,7 @@ GCNTTIImpl::instCombineIntrinsic(InstCombiner &IC, IntrinsicInst &II) const {
         MDNode *MD = MDNode::get(II.getContext(), MDArgs);
         Value *Args[] = {MetadataAsValue::get(II.getContext(), MD)};
         CallInst *NewCall = IC.Builder.CreateCall(NewF, Args);
-        NewCall->addAttribute(AttributeList::FunctionIndex,
-                              Attribute::Convergent);
+        NewCall->addFnAttr(Attribute::Convergent);
         NewCall->takeName(&II);
         return IC.replaceInstUsesWith(II, NewCall);
       }
@@ -708,8 +710,7 @@ GCNTTIImpl::instCombineIntrinsic(InstCombiner &IC, IntrinsicInst &II) const {
         MDNode *MD = MDNode::get(II.getContext(), MDArgs);
         Value *Args[] = {MetadataAsValue::get(II.getContext(), MD)};
         CallInst *NewCall = IC.Builder.CreateCall(NewF, Args);
-        NewCall->addAttribute(AttributeList::FunctionIndex,
-                              Attribute::Convergent);
+        NewCall->addFnAttr(Attribute::Convergent);
         NewCall->takeName(&II);
         return IC.replaceInstUsesWith(II, NewCall);
       }
@@ -919,7 +920,7 @@ static Value *simplifyAMDGCNMemoryIntrinsicDemanded(InstCombiner &IC,
   IC.Builder.SetInsertPoint(&II);
 
   // Assume the arguments are unchanged and later override them, if needed.
-  SmallVector<Value *, 16> Args(II.arg_begin(), II.arg_end());
+  SmallVector<Value *, 16> Args(II.args());
 
   if (DMaskIdx < 0) {
     // Buffer case.
@@ -1038,8 +1039,7 @@ static Value *simplifyAMDGCNMemoryIntrinsicDemanded(InstCombiner &IC,
       EltMask.push_back(NewNumElts);
   }
 
-  Value *Shuffle =
-      IC.Builder.CreateShuffleVector(NewCall, UndefValue::get(NewTy), EltMask);
+  Value *Shuffle = IC.Builder.CreateShuffleVector(NewCall, EltMask);
 
   return Shuffle;
 }

@@ -1586,7 +1586,7 @@ public:
 private:
   void output(StringRef s);
   void outputUpToEndOfLine(StringRef s);
-  void newLineCheck();
+  void newLineCheck(bool EmptySequence = false);
   void outputNewLine();
   void paddedKey(StringRef key);
   void flowKey(StringRef Key);
@@ -1641,7 +1641,7 @@ void IO::processKeyWithDefault(const char *Key, Optional<T> &Val,
     // usually None.
     bool IsNone = false;
     if (!outputting())
-      if (auto *Node = dyn_cast<ScalarNode>(((Input *)this)->getCurrentNode()))
+      if (const auto *Node = dyn_cast<ScalarNode>(((Input *)this)->getCurrentNode()))
         // We use rtrim to ignore possible white spaces that might exist when a
         // comment is present on the same line.
         IsNone = Node->getRawValue().rtrim(' ') == "<none>";

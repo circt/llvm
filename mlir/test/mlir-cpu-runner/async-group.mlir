@@ -1,17 +1,20 @@
-// RUN: true
-// TODO: re-enable when not flaky.
-// _UN:   mlir-opt %s -async-ref-counting                                      \
-// _UN:               -convert-async-to-llvm                                   \
-// _UN:               -convert-std-to-llvm                                     \
-// _UN: | mlir-cpu-runner                                                      \
-// _UN:     -e main -entry-point-result=void -O0                               \
-// _UN:     -shared-libs=%linalg_test_lib_dir/libmlir_c_runner_utils%shlibext  \
-// _UN:     -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext    \
-// _UN:     -shared-libs=%linalg_test_lib_dir/libmlir_async_runtime%shlibext   \
-// _UN: | FileCheck %s
+// RUN:   mlir-opt %s -async-to-async-runtime                                  \
+// RUN:               -async-runtime-ref-counting                              \
+// RUN:               -async-runtime-ref-counting-opt                          \
+// RUN:               -convert-async-to-llvm                                   \
+// RUN:               -convert-std-to-llvm                                     \
+// RUN: | mlir-cpu-runner                                                      \
+// RUN:     -e main -entry-point-result=void -O0                               \
+// RUN:     -shared-libs=%linalg_test_lib_dir/libmlir_c_runner_utils%shlibext  \
+// RUN:     -shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext    \
+// RUN:     -shared-libs=%linalg_test_lib_dir/libmlir_async_runtime%shlibext   \
+// RUN: | FileCheck %s
 
 func @main() {
-  %group = async.create_group
+  %c1 = constant 1 : index
+  %c5 = constant 5 : index
+
+  %group = async.create_group %c5 : !async.group
 
   %token0 = async.execute { async.yield }
   %token1 = async.execute { async.yield }
@@ -30,7 +33,7 @@ func @main() {
     async.yield
   }
 
-  %group0 = async.create_group
+  %group0 = async.create_group %c1 : !async.group
   %5 = async.add_to_group %token5, %group0 : !async.token
   async.await_all %group0
 

@@ -13,6 +13,7 @@
 #ifndef LLVM_ADT_STRINGEXTRAS_H
 #define LLVM_ADT_STRINGEXTRAS_H
 
+#include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
@@ -71,7 +72,7 @@ inline unsigned hexDigitValue(char C) {
     constexpr HexTable() {
       // Default initialize everything to invalid.
       for (int i = 0; i < 255; ++i)
-        LUT[i] = -1U;
+        LUT[i] = ~0U;
       // Initialize `0`-`9`.
       for (int i = 0; i < 10; ++i)
         LUT['0' + i] = i;
@@ -88,7 +89,7 @@ inline unsigned hexDigitValue(char C) {
 inline bool isDigit(char C) { return C >= '0' && C <= '9'; }
 
 /// Checks if character \p C is a hexadecimal numeric character.
-inline bool isHexDigit(char C) { return hexDigitValue(C) != -1U; }
+inline bool isHexDigit(char C) { return hexDigitValue(C) != ~0U; }
 
 /// Checks if character \p C is a valid letter as classified by "C" locale.
 inline bool isAlpha(char C) {
@@ -184,7 +185,7 @@ inline std::string toHex(ArrayRef<uint8_t> Input, bool LowerCase = false) {
 inline bool tryGetHexFromNibbles(char MSB, char LSB, uint8_t &Hex) {
   unsigned U1 = hexDigitValue(MSB);
   unsigned U2 = hexDigitValue(LSB);
-  if (U1 == -1U || U2 == -1U)
+  if (U1 == ~0U || U2 == ~0U)
     return false;
 
   Hex = static_cast<uint8_t>((U1 << 4) | U2);
@@ -291,9 +292,20 @@ inline std::string utostr(uint64_t X, bool isNeg = false) {
 
 inline std::string itostr(int64_t X) {
   if (X < 0)
-    return utostr(-static_cast<uint64_t>(X), true);
+    return utostr(static_cast<uint64_t>(1) + ~static_cast<uint64_t>(X), true);
   else
     return utostr(static_cast<uint64_t>(X));
+}
+
+inline std::string toString(const APInt &I, unsigned Radix, bool Signed,
+                            bool formatAsCLiteral = false) {
+  SmallString<40> S;
+  I.toString(S, Radix, Signed, formatAsCLiteral);
+  return std::string(S.str());
+}
+
+inline std::string toString(const APSInt &I, unsigned Radix) {
+  return toString(I, Radix, I.isSigned());
 }
 
 /// StrInStrNoCase - Portable version of strcasestr.  Locates the first
@@ -384,13 +396,16 @@ inline std::string join_impl(IteratorT Begin, IteratorT End,
 
   size_t Len = (std::distance(Begin, End) - 1) * Separator.size();
   for (IteratorT I = Begin; I != End; ++I)
-    Len += (*Begin).size();
+    Len += (*I).size();
   S.reserve(Len);
+  size_t PrevCapacity = S.capacity();
+  (void)PrevCapacity;
   S += (*Begin);
   while (++Begin != End) {
     S += Separator;
     S += (*Begin);
   }
+  assert(PrevCapacity == S.capacity() && "String grew during building");
   return S;
 }
 
@@ -461,6 +476,30 @@ inline std::string join_items(Sep Separator, Args &&... Items) {
   detail::join_items_impl(Result, Separator, std::forward<Args>(Items)...);
   return Result;
 }
+
+/// A helper class to return the specified delimiter string after the first
+/// invocation of operator StringRef().  Used to generate a comma-separated
+/// list from a loop like so:
+///
+/// \code
+///   ListSeparator LS;
+///   for (auto &I : C)
+///     OS << LS << I.getName();
+/// \end
+class ListSeparator {
+  bool First = true;
+  StringRef Separator;
+
+public:
+  ListSeparator(StringRef Separator = ", ") : Separator(Separator) {}
+  operator StringRef() {
+    if (First) {
+      First = false;
+      return {};
+    }
+    return Separator;
+  }
+};
 
 } // end namespace llvm
 

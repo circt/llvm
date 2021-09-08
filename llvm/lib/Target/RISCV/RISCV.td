@@ -56,6 +56,14 @@ def HasStdExtC : Predicate<"Subtarget->hasStdExtC()">,
                            AssemblerPredicate<(all_of FeatureStdExtC),
                            "'C' (Compressed Instructions)">;
 
+def FeatureExtZba
+    : SubtargetFeature<"experimental-zba", "HasStdExtZba", "true",
+                       "'Zba' (Address calculation 'B' Instructions)">;
+def HasStdExtZba : Predicate<"Subtarget->hasStdExtZba()">,
+                             AssemblerPredicate<(all_of FeatureExtZba),
+                             "'Zba' (Address calculation 'B' Instructions)">;
+def NotHasStdExtZba : Predicate<"!Subtarget->hasStdExtZba()">;
+
 def FeatureExtZbb
     : SubtargetFeature<"experimental-zbb", "HasStdExtZbb", "true",
                        "'Zbb' (Base 'B' Instructions)">;
@@ -123,10 +131,9 @@ def HasStdExtZbt : Predicate<"Subtarget->hasStdExtZbt()">,
 // subextensions. They should be enabled if either has been specified.
 def HasStdExtZbbOrZbp
     : Predicate<"Subtarget->hasStdExtZbb() || Subtarget->hasStdExtZbp()">,
-                AssemblerPredicate<(any_of FeatureExtZbb, FeatureExtZbp)>;
-def NotHasStdExtZbbOrZbp
-    : Predicate<"!(Subtarget->hasStdExtZbb() || Subtarget->hasStdExtZbp())">;
-def NotHasStdExtZbb : Predicate<"!Subtarget->hasStdExtZbb()">;
+                AssemblerPredicate<(any_of FeatureExtZbb, FeatureExtZbp),
+                                   "'Zbb' (Base 'B' Instructions) or "
+                                   "'Zbp' (Permutation 'B' Instructions)">;
 
 def FeatureExtZbproposedc
     : SubtargetFeature<"experimental-zbproposedc", "HasStdExtZbproposedc", "true",
@@ -138,7 +145,8 @@ def HasStdExtZbproposedc : Predicate<"Subtarget->hasStdExtZbproposedc()">,
 def FeatureStdExtB
     : SubtargetFeature<"experimental-b", "HasStdExtB", "true",
                        "'B' (Bit Manipulation Instructions)",
-                       [FeatureExtZbb,
+                       [FeatureExtZba,
+                        FeatureExtZbb,
                         FeatureExtZbc,
                         FeatureExtZbe,
                         FeatureExtZbf,
@@ -160,8 +168,7 @@ def HasRVCHints : Predicate<"Subtarget->enableRVCHintInstrs()">,
 
 def FeatureStdExtV
     : SubtargetFeature<"experimental-v", "HasStdExtV", "true",
-                       "'V' (Vector Instructions)",
-                       [FeatureStdExtF]>;
+                       "'V' (Vector Instructions)">;
 def HasStdExtV : Predicate<"Subtarget->hasStdExtV()">,
                            AssemblerPredicate<(all_of FeatureStdExtV),
                            "'V' (Vector Instructions)">;
@@ -171,15 +178,16 @@ def FeatureStdExtZvlsseg
                        "'Zvlsseg' (Vector segment load/store instructions)",
                        [FeatureStdExtV]>;
 def HasStdExtZvlsseg : Predicate<"Subtarget->hasStdExtZvlsseg()">,
-                        AssemblerPredicate<(all_of FeatureStdExtZvlsseg),
-                        "'Zvlsseg' (Vector segment load/store instructions)">;
+                                 AssemblerPredicate<(all_of FeatureStdExtZvlsseg),
+                                 "'Zvlsseg' (Vector segment load/store instructions)">;
+
 def FeatureExtZvamo
     : SubtargetFeature<"experimental-zvamo", "HasStdExtZvamo", "true",
-                       "'Zvamo'(Vector AMO Operations)",
+                       "'Zvamo' (Vector AMO Operations)",
                        [FeatureStdExtV]>;
 def HasStdExtZvamo : Predicate<"Subtarget->hasStdExtZvamo()">,
-                              AssemblerPredicate<(all_of FeatureExtZvamo),
-                              "'Zvamo'(Vector AMO Operations)">;
+                               AssemblerPredicate<(all_of FeatureExtZvamo),
+                               "'Zvamo' (Vector AMO Operations)">;
 
 def Feature64Bit
     : SubtargetFeature<"64bit", "HasRV64", "true", "Implements RV64">;
@@ -243,6 +251,11 @@ def : ProcessorModel<"sifive-7-rv32", SiFive7Model, []>;
 def : ProcessorModel<"sifive-7-rv64", SiFive7Model, [Feature64Bit]>;
 
 def : ProcessorModel<"sifive-e31", RocketModel, [FeatureStdExtM,
+                                                 FeatureStdExtA,
+                                                 FeatureStdExtC]>;
+
+def : ProcessorModel<"sifive-s51", RocketModel, [Feature64Bit,
+                                                 FeatureStdExtM,
                                                  FeatureStdExtA,
                                                  FeatureStdExtC]>;
 

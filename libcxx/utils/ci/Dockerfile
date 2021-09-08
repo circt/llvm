@@ -12,24 +12,15 @@
 # can also just start the image with a shell to debug CI failures.
 #
 # To start a Buildkite Agent, run it as:
-#   $ docker run --env-file secrets.env -it $(docker build -q .)
+#   $ docker run --env-file <secrets> -it $(docker build -q .)
 #
-# The environment variables in `secrets.env` must be replaced by the actual
-# tokens for this to work. These should obviously never be checked in.
+# The environment variables in `<secrets>` should be the ones necessary
+# to run a BuildKite agent.
 #
-# To start a shell in the Docker image, use:
-#   $ docker run -it --volume "$(git rev-parse --show-toplevel):/llvm" --workdir "/llvm" $(docker build -q .) bash
+# If you're only looking to run the Docker image locally for debugging a
+# build bot, see the `run-buildbot-container` script located in this directory.
 #
-# This will fire up the Docker container and mount the root of the monorepo
-# as /llvm in the container. Be careful, the state in /llvm is shared between
-# the container and the host machine.
-#
-# Finally, a pre-built version of this image is available on DockerHub as
-# ldionne/libcxx-builder. To use the pre-built version of the image, use
-#
-#   $ docker pull ldionne/libcxx-builder
-#   $ docker run -it <options> ldionne/libcxx-builder
-#
+# A pre-built version of this image is maintained on DockerHub as ldionne/libcxx-builder.
 # To update the image, rebuild it and push it to ldionne/libcxx-builder (which
 # will obviously only work if you have permission to do so).
 #
@@ -45,23 +36,33 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y bash curl
 
 # Install various tools used by the build or the test suite
-RUN apt-get update && apt-get install -y ninja-build python3 python3-sphinx python3-distutils git gdb clang-format
+RUN apt-get update && apt-get install -y ninja-build python3 python3-sphinx python3-distutils git gdb
 RUN apt-get update && apt-get install -y libc6-dev-i386 # Required to cross-compile to 32 bits
 
-# Install the most recently released LLVM
+# Install Clang <latest>, <latest-1> and ToT, which are the ones we support.
+ENV LLVM_LATEST_VERSION=12
 RUN apt-get update && apt-get install -y lsb-release wget software-properties-common
-RUN bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
-RUN ln -s $(find /usr/bin -regex '^.+/clang\+\+-[0-9.]+$') /usr/bin/clang++
-RUN ln -s $(find /usr/bin -regex '^.+/clang-[0-9.]+$') /usr/bin/clang
+RUN wget https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh
+RUN bash /tmp/llvm.sh $(($LLVM_LATEST_VERSION - 1)) # previous release
+RUN bash /tmp/llvm.sh $LLVM_LATEST_VERSION          # latest release
+RUN bash /tmp/llvm.sh $(($LLVM_LATEST_VERSION + 1)) # current ToT
 
-# Install a recent GCC
+# Make the ToT Clang the "default" compiler on the system
+RUN ln -fs /usr/bin/clang++-$(($LLVM_LATEST_VERSION + 1)) /usr/bin/c++ && [ -e $(readlink /usr/bin/c++) ]
+RUN ln -fs /usr/bin/clang-$(($LLVM_LATEST_VERSION + 1)) /usr/bin/cc && [ -e $(readlink /usr/bin/cc) ]
+
+# Install clang-format
+RUN apt-get install -y clang-format-$LLVM_LATEST_VERSION
+RUN ln -s /usr/bin/clang-format-$LLVM_LATEST_VERSION /usr/bin/clang-format && [ -e $(readlink /usr/bin/clang-format) ]
+RUN ln -s /usr/bin/git-clang-format-$LLVM_LATEST_VERSION /usr/bin/git-clang-format && [ -e $(readlink /usr/bin/git-clang-format) ]
+
+# Install the most recent GCC
+ENV GCC_LATEST_VERSION=11
 RUN add-apt-repository ppa:ubuntu-toolchain-r/test
-RUN apt-get update && apt install -y gcc-10 g++-10
-RUN ln -f -s /usr/bin/g++-10 /usr/bin/g++
-RUN ln -f -s /usr/bin/gcc-10 /usr/bin/gcc
+RUN apt-get update && apt install -y gcc-$GCC_LATEST_VERSION g++-$GCC_LATEST_VERSION
 
 # Install a recent CMake
-RUN wget https://github.com/Kitware/CMake/releases/download/v3.18.2/cmake-3.18.2-Linux-x86_64.sh -O /tmp/install-cmake.sh
+RUN wget https://github.com/Kitware/CMake/releases/download/v3.21.1/cmake-3.21.1-linux-x86_64.sh -O /tmp/install-cmake.sh
 RUN bash /tmp/install-cmake.sh --prefix=/usr --exclude-subdir --skip-license
 RUN rm /tmp/install-cmake.sh
 
@@ -77,6 +78,7 @@ WORKDIR /home/libcxx-builder
 # for the Buildkite agent to be installed in a path where we can find it.
 RUN bash -c "$(curl -sL https://raw.githubusercontent.com/buildkite/agent/master/install.sh)"
 ENV PATH="${PATH}:/home/libcxx-builder/.buildkite-agent/bin"
+RUN echo "tags=\"queue=libcxx-builders,arch=$(uname -m),os=linux\"" >> "/home/libcxx-builder/.buildkite-agent/buildkite-agent.cfg"
 
 # By default, start the Buildkite agent (this requires a token).
-CMD buildkite-agent start --tags "queue=libcxx-builders"
+CMD buildkite-agent start

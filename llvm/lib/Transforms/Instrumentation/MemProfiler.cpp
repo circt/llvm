@@ -255,8 +255,6 @@ PreservedAnalyses MemProfilerPass::run(Function &F,
   if (Profiler.instrumentFunction(F))
     return PreservedAnalyses::none();
   return PreservedAnalyses::all();
-
-  return PreservedAnalyses::all();
 }
 
 ModuleMemProfilerPass::ModuleMemProfilerPass() {}
@@ -577,7 +575,7 @@ bool MemProfiler::insertDynamicShadowAtFunctionEntry(Function &F) {
   Value *GlobalDynamicAddress = F.getParent()->getOrInsertGlobal(
       MemProfShadowMemoryDynamicAddress, IntptrTy);
   if (F.getParent()->getPICLevel() == PICLevel::NotPIC)
-    dyn_cast<GlobalVariable>(GlobalDynamicAddress)->setDSOLocal(true);
+    cast<GlobalVariable>(GlobalDynamicAddress)->setDSOLocal(true);
   DynamicShadowOffset = IRB.CreateLoad(IntptrTy, GlobalDynamicAddress);
   return true;
 }

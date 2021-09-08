@@ -11,12 +11,12 @@ Standalone Tool
 ===============
 
 :program:`clang-format` is located in `clang/tools/clang-format` and can be used
-to format C/C++/Java/JavaScript/Objective-C/Protobuf/C# code.
+to format C/C++/Java/JavaScript/JSON/Objective-C/Protobuf/C# code.
 
 .. code-block:: console
 
   $ clang-format -help
-  OVERVIEW: A tool to format C/C++/Java/JavaScript/Objective-C/Protobuf/C# code.
+  OVERVIEW: A tool to format C/C++/Java/JavaScript/JSON/Objective-C/Protobuf/C# code.
 
   If no arguments are specified, it formats the code from standard input
   and writes the result to the standard output.
@@ -31,12 +31,13 @@ to format C/C++/Java/JavaScript/Objective-C/Protobuf/C# code.
   Clang-format options:
 
     --Werror                   - If set, changes formatting warnings to errors
-    --Wno-error=unknown        - If set, unknown format options are only warned about.
-                                 This can be used to enable formatting, even if the
-                                 configuration contains unknown (newer) options.
-                                 Use with caution, as this might lead to dramatically
-                                 differing format depending on an option being
-                                 supported or not.
+    --Wno-error=<value>        - If set don't error out on the specified warning type.
+      =unknown                 -   If set, unknown format options are only warned about.
+                                   This can be used to enable formatting, even if the
+                                   configuration contains unknown (newer) options.
+                                   Use with caution, as this might lead to dramatically
+                                   differing format depending on an option being
+                                   supported or not.
     --assume-filename=<string> - Override filename used to determine the language.
                                  When reading from stdin, clang-format assumes this
                                  filename to determine the language.
